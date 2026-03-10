@@ -689,9 +689,11 @@ fun HomeScreen(user: UserData) {
 data class EventData(
     val title: String,
     val maxRegistration: String,
-    val price: String,
-    val dateTime: String,
+    val registrationFee: String,
+    val date: String,
+    val time: String,
     val venue: String,
+    val description: String,
     val qrCodeUrl: String
 )
 
@@ -701,11 +703,14 @@ val globalEvents = mutableStateListOf<EventData>()
 @Composable
 fun EventsScreen(user: UserData) {
     var showDialog by remember { mutableStateOf(false) }
+    var editingEventIndex by remember { mutableStateOf<Int?>(null) }
     var title by remember { mutableStateOf("") }
     var maxRegistration by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("") }
-    var dateTime by remember { mutableStateOf("") }
+    var registrationFee by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf("") }
+    var time by remember { mutableStateOf("") }
     var venue by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
     var qrCodeUrl by remember { mutableStateOf("") }
     var selectedEvent by remember { mutableStateOf<EventData?>(null) }
 
@@ -722,7 +727,18 @@ fun EventsScreen(user: UserData) {
             Text("Events", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
             if (user.role == "Admin") {
                 Button(
-                    onClick = { showDialog = true },
+                    onClick = { 
+                        editingEventIndex = null
+                        title = ""
+                        maxRegistration = ""
+                        registrationFee = ""
+                        date = ""
+                        time = ""
+                        venue = ""
+                        description = ""
+                        qrCodeUrl = ""
+                        showDialog = true 
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     modifier = Modifier.height(36.dp)
@@ -739,6 +755,8 @@ fun EventsScreen(user: UserData) {
         ) {
             items(globalEvents.size) { index ->
                 val event = globalEvents[index]
+                var expandedMenu by remember { mutableStateOf(false) }
+                
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -747,11 +765,54 @@ fun EventsScreen(user: UserData) {
                         .fillMaxWidth()
                         .clickable { selectedEvent = event }
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(event.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(event.dateTime, fontSize = 14.sp, color = Color.Gray)
-                        Text(event.venue, fontSize = 14.sp, color = Color.Gray)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(event.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("${event.date} at ${event.time}", fontSize = 14.sp, color = Color.Gray)
+                            Text(event.venue, fontSize = 14.sp, color = Color.Gray)
+                        }
+                        
+                        if (user.role == "Admin") {
+                            Box {
+                                IconButton(onClick = { expandedMenu = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = Color.Gray)
+                                }
+                                DropdownMenu(
+                                    expanded = expandedMenu,
+                                    onDismissRequest = { expandedMenu = false },
+                                    modifier = Modifier.background(Color.White)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Edit Event", color = Color.Black) }, 
+                                        onClick = { 
+                                            expandedMenu = false
+                                            editingEventIndex = index
+                                            title = event.title
+                                            maxRegistration = event.maxRegistration
+                                            registrationFee = event.registrationFee
+                                            date = event.date
+                                            time = event.time
+                                            venue = event.venue
+                                            description = event.description
+                                            qrCodeUrl = event.qrCodeUrl
+                                            showDialog = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Delete Event", color = Color.Red) }, 
+                                        onClick = { 
+                                            expandedMenu = false
+                                            globalEvents.removeAt(index)
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -761,40 +822,74 @@ fun EventsScreen(user: UserData) {
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
-            title = { Text("Add New Event") },
+            title = { Text(if (editingEventIndex != null) "Edit Event" else "Add New Event") },
             text = {
-                Column(modifier = Modifier.padding(8.dp)) {
-                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Event Title") }, singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = maxRegistration, onValueChange = { maxRegistration = it }, label = { Text("Max Registration (e.g., 50)") }, singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., Free, $50)") }, singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = dateTime, onValueChange = { dateTime = it }, label = { Text("Date & Time") }, singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = venue, onValueChange = { venue = it }, label = { Text("Venue") }, singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = qrCodeUrl, onValueChange = { qrCodeUrl = it }, label = { Text("Payment QR Code URL") }, singleLine = true)
+                LazyColumn(modifier = Modifier.padding(8.dp)) {
+                    item { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Event Title") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = maxRegistration, onValueChange = { maxRegistration = it }, label = { Text("Max Registration (e.g., 50)") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = registrationFee, onValueChange = { registrationFee = it }, label = { Text("Registration Fee (e.g., Free, $50)") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { 
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Date") }, singleLine = true, modifier = Modifier.weight(1f))
+                            OutlinedTextField(value = time, onValueChange = { time = it }, label = { Text("Time") }, singleLine = true, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = venue, onValueChange = { venue = it }, label = { Text("Venue") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item {
+                        val wordCount = description.split("\\s+".toRegex()).count { it.isNotEmpty() }
+                        OutlinedTextField(
+                            value = description,
+                            onValueChange = { 
+                                val newWordCount = it.split("\\s+".toRegex()).count { word -> word.isNotEmpty() }
+                                if (newWordCount <= 500) {
+                                    description = it 
+                                }
+                            },
+                            label = { Text("Description") },
+                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                            maxLines = 5,
+                            supportingText = { Text("$wordCount/500 words") }
+                        )
+                    }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = qrCodeUrl, onValueChange = { qrCodeUrl = it }, label = { Text("Payment QR Code Image URL") }, singleLine = true) }
                 }
             },
             confirmButton = {
                 Button(onClick = {
                     if (title.isNotBlank()) {
-                        globalEvents.add(EventData(title, maxRegistration, price, dateTime, venue, qrCodeUrl))
+                        val newEvent = EventData(title, maxRegistration, registrationFee, date, time, venue, description, qrCodeUrl)
+                        if (editingEventIndex != null) {
+                            globalEvents[editingEventIndex!!] = newEvent
+                        } else {
+                            globalEvents.add(newEvent)
+                        }
+                        
                         title = ""
                         maxRegistration = ""
-                        price = ""
-                        dateTime = ""
+                        registrationFee = ""
+                        date = ""
+                        time = ""
                         venue = ""
+                        description = ""
                         qrCodeUrl = ""
+                        editingEventIndex = null
                         showDialog = false
                     }
                 }) {
-                    Text("Add")
+                    Text(if (editingEventIndex != null) "Save" else "Add")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { 
+                    showDialog = false 
+                    editingEventIndex = null
+                }) { Text("Cancel") }
             }
         )
     }
@@ -804,26 +899,40 @@ fun EventsScreen(user: UserData) {
             onDismissRequest = { selectedEvent = null },
             title = { Text(selectedEvent!!.title, fontWeight = FontWeight.Bold) },
             text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("Max Registration: ${selectedEvent!!.maxRegistration}", color = Color.Black)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Price: ${selectedEvent!!.price}", color = Color.Black)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Date: ${selectedEvent!!.dateTime}", color = Color.Black)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Venue: ${selectedEvent!!.venue}", color = Color.Black)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Payment QR Code:", fontWeight = FontWeight.Medium, color = Color.Black)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    if (selectedEvent!!.qrCodeUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = selectedEvent!!.qrCodeUrl,
-                            contentDescription = "QR Code",
-                            modifier = Modifier.size(200.dp).align(Alignment.CenterHorizontally),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text("No QR Code provided.", color = Color.Gray, modifier = Modifier.align(Alignment.CenterHorizontally))
+                LazyColumn(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    item { Text("Max Registration: ${selectedEvent!!.maxRegistration}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Registration Fee: ${selectedEvent!!.registrationFee}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Date: ${selectedEvent!!.date}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Time: ${selectedEvent!!.time}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Venue: ${selectedEvent!!.venue}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    if (selectedEvent!!.description.isNotBlank()) {
+                        item { Text("Description:", fontWeight = FontWeight.Medium, color = Color.Black) }
+                        item { Spacer(modifier = Modifier.height(4.dp)) }
+                        item { Text(selectedEvent!!.description, color = Color.DarkGray, fontSize = 14.sp) }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
+                    }
+                    item { Text("Payment QR Code:", fontWeight = FontWeight.Medium, color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item {
+                        if (selectedEvent!!.qrCodeUrl.isNotBlank()) {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                AsyncImage(
+                                    model = selectedEvent!!.qrCodeUrl,
+                                    contentDescription = "Payment QR Code",
+                                    modifier = Modifier.size(200.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                        } else {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Text("No QR Code provided.", color = Color.Gray)
+                            }
+                        }
                     }
                 }
             },
