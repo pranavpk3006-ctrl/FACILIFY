@@ -37,7 +37,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    FacilifyApp()
+                    MainNavigation()
                 }
             }
         }
@@ -57,16 +57,43 @@ fun FacilifyTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun FacilifyApp() {
+fun MainNavigation() {
+    var loggedInUser by remember { mutableStateOf<UserData?>(null) }
+    
+    if (loggedInUser == null) {
+        LoginScreen(onLoginSuccess = { user -> loggedInUser = user })
+    } else {
+        FacilifyApp(user = loggedInUser!!, onLogout = { loggedInUser = null })
+    }
+}
+
+val globalGalleryImages = mutableStateListOf(
+    "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=600&h=400",
+    "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=600&h=400",
+    "https://images.unsplash.com/photo-1581093458791-9f3c3900df4b?auto=format&fit=crop&q=80&w=600&h=400"
+)
+
+@Composable
+fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(1) } // Default selected: Facility
+    var showNotifications by remember { mutableStateOf(false) }
 
     Scaffold(
+        topBar = {
+            if (!showNotifications) {
+                TopBar(
+                    user = user, 
+                    onNotificationClick = { showNotifications = true }, 
+                    onLogout = onLogout,
+                    modifier = Modifier.background(Color(0xFFF5F5F7)).padding(horizontal = 16.dp)
+                )
+            }
+        },
         bottomBar = {
             BottomNavigationBar(selectedTab = selectedTab) { index ->
                 selectedTab = index
-                val tabNames = listOf("Home", "Facility", "Team", "Events")
-                Toast.makeText(context, "${tabNames[index]} clicked!", Toast.LENGTH_SHORT).show()
+                showNotifications = false
             }
         }
     ) { paddingValues ->
@@ -76,12 +103,19 @@ fun FacilifyApp() {
                 .padding(paddingValues)
                 .background(Color(0xFFF5F5F7))
         ) {
-            if (selectedTab == 1) { // Render Facility screen content
+            if (showNotifications) {
+                NotificationsScreen(onBack = { showNotifications = false })
+            } else if (selectedTab == 0) { // Home Screen content
+                HomeScreen(user = user)
+            } else if (selectedTab == 1) { // Render Facility screen content
                 FacilityScreen()
+            } else if (selectedTab == 3) {
+                EventsScreen(user = user)
             } else {
                 // Placeholder for other screens
+                val tabNames = listOf("Home", "Facility", "Team", "Events")
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = "Navigate to Facility Tab", fontSize = 18.sp, color = Color.Gray)
+                    Text(text = "Navigate to Facility Tab (You are on ${tabNames[selectedTab]})", fontSize = 18.sp, color = Color.Gray)
                 }
             }
         }
@@ -95,7 +129,7 @@ fun FacilityScreen() {
             .fillMaxSize()
             .padding(horizontal = 16.dp)
     ) {
-        item { TopBar() }
+
         item { Spacer(modifier = Modifier.height(16.dp)) }
         item { SearchBar() }
         item { Spacer(modifier = Modifier.height(24.dp)) }
@@ -115,49 +149,67 @@ fun FacilityScreen() {
 }
 
 @Composable
-fun TopBar() {
+fun TopBar(user: UserData, onNotificationClick: () -> Unit = {}, onLogout: () -> Unit = {}, modifier: Modifier = Modifier) {
+    var profileMenuExpanded by remember { mutableStateOf(false) }
+
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(top = 16.dp),
+            .padding(top = 16.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = "FACILIFY",
-            color = Color(0xFF2E7D32),
-            fontSize = 24.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 1.sp
-        )
+        // Left side profile photo & username
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(
-                model = "https://i.pravatar.cc/100?img=11",
-                contentDescription = "Profile Picture",
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Alex J.", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color.Black)
-            Spacer(modifier = Modifier.width(16.dp))
             Box {
-                Icon(
-                    imageVector = Icons.Outlined.Notifications,
-                    contentDescription = "Notifications",
-                    modifier = Modifier.size(28.dp),
-                    tint = Color.Black
-                )
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
-                        .background(Color.Red)
-                        .align(Alignment.TopEnd)
-                        .offset(x = (-2).dp, y = 2.dp)
-                )
+                        .background(Color(0xFFE0E0E0))
+                        .clickable { profileMenuExpanded = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("😊", fontSize = 20.sp)
+                }
+                DropdownMenu(
+                    expanded = profileMenuExpanded,
+                    onDismissRequest = { profileMenuExpanded = false },
+                    modifier = Modifier.background(Color.White)
+                ) {
+                    DropdownMenuItem(text = { Text("Hi ${user.name}", color = Color.Black) }, onClick = { profileMenuExpanded = false })
+                    DropdownMenuItem(text = { Text("Roll ${user.rollNo}", color = Color.Black) }, onClick = { profileMenuExpanded = false })
+                    DropdownMenuItem(text = { Text("Help", color = Color.Black) }, onClick = { profileMenuExpanded = false })
+                    DropdownMenuItem(text = { Text("Logout", color = Color.Black) }, onClick = { 
+                        profileMenuExpanded = false
+                        onLogout()
+                    })
+                }
             }
+            Spacer(modifier = Modifier.width(8.dp))
+            val welcomeText = if (user.role == "Admin") "HI ADMIN" else "HI USER"
+            Column {
+                Text(welcomeText, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                Text(user.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.Black)
+            }
+        }
+        
+        // Right side Notifications icon
+        Box(modifier = Modifier.clickable { onNotificationClick() }) {
+            Icon(
+                imageVector = Icons.Outlined.Notifications,
+                contentDescription = "Notifications",
+                modifier = Modifier.size(28.dp),
+                tint = Color.Black
+            )
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(Color.Red)
+                    .align(Alignment.TopEnd)
+                    .offset(x = (-2).dp, y = 2.dp)
+            )
         }
     }
 }
@@ -421,3 +473,366 @@ fun getDummySpaces(): List<SpaceData> {
         )
     )
 }
+
+
+@Composable
+fun NotificationsScreen(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.Black)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Notifications", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Text(
+                text = "Hello user !",
+                modifier = Modifier.padding(16.dp),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black
+            )
+        }
+    }
+}
+
+data class UserData(
+    val name: String,
+    val rollNo: String,
+    val role: String // "Admin" or "User"
+)
+
+val mockAdmins = listOf(
+    UserData("Pranav", "2501ME09", "Admin"),
+    UserData("Sushankit", "2501MM09", "Admin")
+)
+
+@Composable
+fun LoginScreen(onLoginSuccess: (UserData) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var rollNo by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("FACILIFY", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF2E7D32), letterSpacing = 2.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Welcome! Please login to continue.", fontSize = 16.sp, color = Color.Gray)
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Name") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        OutlinedTextField(
+            value = rollNo,
+            onValueChange = { rollNo = it },
+            label = { Text("Roll No.") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        if (errorMessage.isNotEmpty()) {
+            Text(errorMessage, color = Color.Red, fontSize = 14.sp)
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Button(
+            onClick = {
+                if (name.isBlank() || rollNo.isBlank()) {
+                    errorMessage = "Please enter both Name and Roll No."
+                    return@Button
+                }
+                
+                // Check against mock database
+                val adminUser = mockAdmins.find { it.rollNo.equals(rollNo, ignoreCase = true) && it.name.equals(name, ignoreCase = true) }
+                if (adminUser != null) {
+                    onLoginSuccess(adminUser)
+                } else {
+                    // Sign in as a regular user
+                    onLoginSuccess(UserData(name = name, rollNo = rollNo, role = "User"))
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+        ) {
+            Text("Login", fontSize = 16.sp, color = Color.White)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(user: UserData) {
+    var showDialog by remember { mutableStateOf(false) }
+    var newImageUrl by remember { mutableStateOf("") }
+    var fullScreenImage by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Gallery", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            if (user.role == "Admin") {
+                Button(
+                    onClick = { showDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("+ Add Photo", color = Color.White, fontSize = 12.sp)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        androidx.compose.foundation.lazy.LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(globalGalleryImages.size) { index ->
+                val imageUrl = globalGalleryImages[index]
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = "Gallery Image",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .height(240.dp)
+                        .width(340.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { fullScreenImage = imageUrl }
+                )
+            }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Add Photo") },
+            text = {
+                OutlinedTextField(
+                    value = newImageUrl,
+                    onValueChange = { newImageUrl = it },
+                    label = { Text("Image URL") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (newImageUrl.isNotBlank()) {
+                        globalGalleryImages.add(newImageUrl)
+                        newImageUrl = ""
+                        showDialog = false
+                    }
+                }) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Full screen image viewer
+    if (fullScreenImage != null) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { fullScreenImage = null }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { fullScreenImage = null }, // click anywhere to close
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = fullScreenImage,
+                    contentDescription = "Full Screen",
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+data class EventData(
+    val title: String,
+    val maxRegistration: String,
+    val price: String,
+    val dateTime: String,
+    val venue: String,
+    val qrCodeUrl: String
+)
+
+val globalEvents = mutableStateListOf<EventData>()
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EventsScreen(user: UserData) {
+    var showDialog by remember { mutableStateOf(false) }
+    var title by remember { mutableStateOf("") }
+    var maxRegistration by remember { mutableStateOf("") }
+    var price by remember { mutableStateOf("") }
+    var dateTime by remember { mutableStateOf("") }
+    var venue by remember { mutableStateOf("") }
+    var qrCodeUrl by remember { mutableStateOf("") }
+    var selectedEvent by remember { mutableStateOf<EventData?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Events", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            if (user.role == "Admin") {
+                Button(
+                    onClick = { showDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("+ Add Event", color = Color.White, fontSize = 12.sp)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(globalEvents.size) { index ->
+                val event = globalEvents[index]
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectedEvent = event }
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(event.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(event.dateTime, fontSize = 14.sp, color = Color.Gray)
+                        Text(event.venue, fontSize = 14.sp, color = Color.Gray)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Add New Event") },
+            text = {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Event Title") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = maxRegistration, onValueChange = { maxRegistration = it }, label = { Text("Max Registration (e.g., 50)") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price (e.g., Free, $50)") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = dateTime, onValueChange = { dateTime = it }, label = { Text("Date & Time") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = venue, onValueChange = { venue = it }, label = { Text("Venue") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = qrCodeUrl, onValueChange = { qrCodeUrl = it }, label = { Text("Payment QR Code URL") }, singleLine = true)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (title.isNotBlank()) {
+                        globalEvents.add(EventData(title, maxRegistration, price, dateTime, venue, qrCodeUrl))
+                        title = ""
+                        maxRegistration = ""
+                        price = ""
+                        dateTime = ""
+                        venue = ""
+                        qrCodeUrl = ""
+                        showDialog = false
+                    }
+                }) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (selectedEvent != null) {
+        AlertDialog(
+            onDismissRequest = { selectedEvent = null },
+            title = { Text(selectedEvent!!.title, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Max Registration: ${selectedEvent!!.maxRegistration}", color = Color.Black)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Price: ${selectedEvent!!.price}", color = Color.Black)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Date: ${selectedEvent!!.dateTime}", color = Color.Black)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Venue: ${selectedEvent!!.venue}", color = Color.Black)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Payment QR Code:", fontWeight = FontWeight.Medium, color = Color.Black)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (selectedEvent!!.qrCodeUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = selectedEvent!!.qrCodeUrl,
+                            contentDescription = "QR Code",
+                            modifier = Modifier.size(200.dp).align(Alignment.CenterHorizontally),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text("No QR Code provided.", color = Color.Gray, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { selectedEvent = null }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+}
+>>>>>>> 7cf440e68b92fc9888f4349f8ab0c4a55820e11c
