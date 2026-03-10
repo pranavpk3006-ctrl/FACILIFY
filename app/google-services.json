@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1063240961080",
+    "project_id": "facilify-50b2d",
+    "storage_bucket": "facilify-50b2d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1063240961080:android:c6df685623db9a37edaacd",
+        "android_client_info": {
+          "package_name": "com.example.facilify"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDIzK02RFLJUb7O-GQ6ANdED7cYoaV59C0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
