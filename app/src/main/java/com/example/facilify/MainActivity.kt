@@ -27,8 +27,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import java.util.UUID
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,7 +101,13 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
     var events by remember { mutableStateOf(emptyList<MainEventConfig>()) }
     var showDialog by remember { mutableStateOf(false) }
     var newEventName by remember { mutableStateOf("") }
-    var newImageUrl by remember { mutableStateOf("") }
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var editingEvent by remember { mutableStateOf<MainEventConfig?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
+
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        imageUri = uri
+    }
 
     LaunchedEffect(Unit) {
         db.collection("mainEvents").addSnapshotListener { snapshot, _ ->
@@ -131,6 +142,7 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
         ) {
             items(events.size) { index ->
                 val event = events[index]
+                var menuExpanded by remember { mutableStateOf(false) }
                 Column(
                     modifier = Modifier.clickable { onEventSelected(event) },
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -152,11 +164,26 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
                             Icon(Icons.Default.Event, contentDescription = "Event", modifier = Modifier.align(Alignment.Center).size(60.dp), tint = Color.Gray)
                         }
                         if (user.role == "Admin") {
-                            IconButton(
-                                onClick = { db.collection("mainEvents").document(event.id).delete() },
-                                modifier = Modifier.align(Alignment.TopEnd).background(Color.White, CircleShape).size(28.dp)
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red, modifier = Modifier.size(16.dp))
+                            Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                                IconButton(
+                                    onClick = { menuExpanded = true },
+                                    modifier = Modifier.background(Color.White, CircleShape).size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.Black, modifier = Modifier.size(16.dp))
+                                }
+                                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                    DropdownMenuItem(text = { Text("Edit") }, onClick = {
+                                        menuExpanded = false
+                                        editingEvent = event
+                                        newEventName = event.name
+                                        imageUri = null
+                                        showDialog = true
+                                    })
+                                    DropdownMenuItem(text = { Text("Delete", color = Color.Red) }, onClick = {
+                                        menuExpanded = false
+                                        db.collection("mainEvents").document(event.id).delete()
+                                    })
+                                }
                             }
                         }
                     }
@@ -168,7 +195,12 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
             if (user.role == "Admin") {
                 item {
                     Column(
-                        modifier = Modifier.clickable { showDialog = true },
+                        modifier = Modifier.clickable { 
+                            editingEvent = null
+                            newEventName = ""
+                            imageUri = null
+                            showDialog = true 
+                        },
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
@@ -189,28 +221,71 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
     }
 
     if (showDialog) {
+        val titleText = if (editingEvent != null) "Edit Event Group" else "New Event Group"
         AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text("New Event Group") },
+            onDismissRequest = { if (!isUploading) showDialog = false },
+            title = { Text(titleText) },
             text = {
                 Column {
-                    OutlinedTextField(value = newEventName, onValueChange = { newEventName = it }, label = { Text("Name") }, singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = newImageUrl, onValueChange = { newImageUrl = it }, label = { Text("Profile Image URL") }, singleLine = true)
+                    OutlinedTextField(
+                        value = newEventName, 
+                        onValueChange = { newEventName = it }, 
+                        label = { Text("Name") }, 
+                        singleLine = true,
+                        enabled = !isUploading
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { imageLauncher.launch("image/*") }, 
+                        enabled = !isUploading,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
+                    ) {
+                        Text(if (imageUri != null) "Image Selected" else "Select Profile Photo")
+                    }
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    if (newEventName.isNotBlank()) {
-                        val docRef = db.collection("mainEvents").document()
-                        docRef.set(mapOf("name" to newEventName, "imageUrl" to newImageUrl))
-                        newEventName = ""
-                        newImageUrl = ""
-                        showDialog = false
+                Button(
+                    enabled = !isUploading,
+                    onClick = {
+                        if (newEventName.isNotBlank() && !isUploading) {
+                            isUploading = true
+                            if (imageUri != null) {
+                                val storageRef = FirebaseStorage.getInstance().reference.child("events/${UUID.randomUUID()}")
+                                storageRef.putFile(imageUri!!).continueWithTask { task ->
+                                    if (!task.isSuccessful) task.exception?.let { throw it }
+                                    storageRef.downloadUrl
+                                }.addOnCompleteListener { task ->
+                                    if (task.isSuccessful) {
+                                        val url = task.result.toString()
+                                        if (editingEvent != null) {
+                                            db.collection("mainEvents").document(editingEvent!!.id).update(mapOf("name" to newEventName, "imageUrl" to url))
+                                        } else {
+                                            db.collection("mainEvents").add(mapOf("name" to newEventName, "imageUrl" to url))
+                                        }
+                                        showDialog = false
+                                        isUploading = false
+                                    } else {
+                                        isUploading = false
+                                    }
+                                }
+                            } else {
+                                val url = editingEvent?.imageUrl ?: ""
+                                if (editingEvent != null) {
+                                    db.collection("mainEvents").document(editingEvent!!.id).update(mapOf("name" to newEventName, "imageUrl" to url))
+                                } else {
+                                    db.collection("mainEvents").add(mapOf("name" to newEventName, "imageUrl" to url))
+                                }
+                                showDialog = false
+                                isUploading = false
+                            }
+                        }
                     }
-                }) { Text("Create") }
+                ) { Text(if (isUploading) "Saving..." else "Save") }
             },
-            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }
+            dismissButton = { 
+                TextButton(onClick = { if (!isUploading) showDialog = false }) { Text("Cancel") } 
+            }
         )
     }
 }
