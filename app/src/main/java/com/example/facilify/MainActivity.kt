@@ -27,7 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-
+import com.google.firebase.firestore.FirebaseFirestore
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,25 +56,120 @@ fun FacilifyTheme(content: @Composable () -> Unit) {
     )
 }
 
-@Composable
-fun MainNavigation() {
-    var loggedInUser by remember { mutableStateOf<UserData?>(null) }
-    
-    if (loggedInUser == null) {
-        LoginScreen(onLoginSuccess = { user -> loggedInUser = user })
-    } else {
-        FacilifyApp(user = loggedInUser!!, onLogout = { loggedInUser = null })
-    }
-}
-
-val globalGalleryImages = mutableStateListOf(
-    "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=600&h=400",
-    "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=600&h=400",
-    "https://images.unsplash.com/photo-1581093458791-9f3c3900df4b?auto=format&fit=crop&q=80&w=600&h=400"
+data class MainEventConfig(
+    val id: String = "",
+    val name: String = ""
 )
 
 @Composable
-fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
+fun MainNavigation() {
+    var loggedInUser by remember { mutableStateOf<UserData?>(null) }
+    var selectedEvent by remember { mutableStateOf<MainEventConfig?>(null) }
+    
+    if (loggedInUser == null) {
+        LoginScreen(onLoginSuccess = { user -> loggedInUser = user })
+    } else if (selectedEvent == null) {
+        EventSelectionScreen(
+            user = loggedInUser!!, 
+            onEventSelected = { selectedEvent = it },
+            onLogout = { loggedInUser = null }
+        )
+    } else {
+        FacilifyApp(
+            user = loggedInUser!!, 
+            mainEvent = selectedEvent!!, 
+            onLogout = { 
+                loggedInUser = null
+                selectedEvent = null
+            },
+            onBackToEvents = { selectedEvent = null }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> Unit, onLogout: () -> Unit) {
+    val db = FirebaseFirestore.getInstance()
+    var events by remember { mutableStateOf(emptyList<MainEventConfig>()) }
+    var showDialog by remember { mutableStateOf(false) }
+    var newEventName by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        db.collection("mainEvents").addSnapshotListener { snapshot, _ ->
+            if (snapshot != null) {
+                events = snapshot.documents.map { doc ->
+                    MainEventConfig(id = doc.id, name = doc.getString("name") ?: "")
+                }
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Select Event", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Button(onClick = onLogout, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                Text("Logout")
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        if (user.role == "Admin") {
+            Button(
+                onClick = { showDialog = true }, 
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+            ) {
+                Text("+ Create New Event Group")
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        LazyColumn {
+            items(events) { event ->
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable { onEventSelected(event) },
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(event.name, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                        if (user.role == "Admin") {
+                            IconButton(onClick = {
+                                db.collection("mainEvents").document(event.id).delete()
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("New Event Group") },
+            text = {
+                OutlinedTextField(value = newEventName, onValueChange = { newEventName = it }, label = { Text("Name") })
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (newEventName.isNotBlank()) {
+                        val docRef = db.collection("mainEvents").document()
+                        docRef.set(mapOf("name" to newEventName))
+                        newEventName = ""
+                        showDialog = false
+                    }
+                }) { Text("Create") }
+            },
+            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+fun FacilifyApp(user: UserData, mainEvent: MainEventConfig, onLogout: () -> Unit, onBackToEvents: () -> Unit) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(1) } // Default selected: Facility
     var showNotifications by remember { mutableStateOf(false) }
@@ -84,8 +179,10 @@ fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
             if (!showNotifications) {
                 TopBar(
                     user = user, 
+                    mainEvent = mainEvent,
                     onNotificationClick = { showNotifications = true }, 
                     onLogout = onLogout,
+                    onBackClick = onBackToEvents,
                     modifier = Modifier.background(Color(0xFFF5F5F7)).padding(horizontal = 16.dp)
                 )
             }
@@ -106,11 +203,11 @@ fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
             if (showNotifications) {
                 NotificationsScreen(onBack = { showNotifications = false })
             } else if (selectedTab == 0) { // Home Screen content
-                HomeScreen(user = user)
+                HomeScreen(user = user, mainEvent = mainEvent)
             } else if (selectedTab == 1) { // Render Facility screen content
                 FacilityScreen()
             } else if (selectedTab == 3) {
-                EventsScreen(user = user)
+                EventsScreen(user = user, mainEvent = mainEvent)
             } else {
                 // Placeholder for other screens
                 val tabNames = listOf("Home", "Facility", "Team", "Events")
@@ -148,7 +245,7 @@ fun FacilityScreen() {
 }
 
 @Composable
-fun TopBar(user: UserData, onNotificationClick: () -> Unit = {}, onLogout: () -> Unit = {}, modifier: Modifier = Modifier) {
+fun TopBar(user: UserData, mainEvent: MainEventConfig, onNotificationClick: () -> Unit = {}, onLogout: () -> Unit = {}, onBackClick: () -> Unit = {}, modifier: Modifier = Modifier) {
     var profileMenuExpanded by remember { mutableStateOf(false) }
 
     Row(
@@ -158,8 +255,38 @@ fun TopBar(user: UserData, onNotificationClick: () -> Unit = {}, onLogout: () ->
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left side profile photo & username
+        // Left side Back Button & Text
         Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBackClick) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.Black)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(mainEvent.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                val welcomeText = if (user.role == "Admin") "Admin: ${user.name}" else "User: ${user.name}"
+                Text(welcomeText, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.Gray)
+            }
+        }
+        
+        // Right side Notifications & Profile
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.clickable { onNotificationClick() }) {
+                Icon(
+                    imageVector = Icons.Outlined.Notifications,
+                    contentDescription = "Notifications",
+                    modifier = Modifier.size(28.dp),
+                    tint = Color.Black
+                )
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(Color.Red)
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-2).dp, y = 2.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
             Box {
                 Box(
                     modifier = Modifier
@@ -185,30 +312,6 @@ fun TopBar(user: UserData, onNotificationClick: () -> Unit = {}, onLogout: () ->
                     })
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            val welcomeText = if (user.role == "Admin") "HI ADMIN" else "HI USER"
-            Column {
-                Text(welcomeText, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
-                Text(user.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.Black)
-            }
-        }
-        
-        // Right side Notifications icon
-        Box(modifier = Modifier.clickable { onNotificationClick() }) {
-            Icon(
-                imageVector = Icons.Outlined.Notifications,
-                contentDescription = "Notifications",
-                modifier = Modifier.size(28.dp),
-                tint = Color.Black
-            )
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(Color.Red)
-                    .align(Alignment.TopEnd)
-                    .offset(x = (-2).dp, y = 2.dp)
-            )
         }
     }
 }
@@ -584,16 +687,23 @@ fun LoginScreen(onLoginSuccess: (UserData) -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(user: UserData) {
+fun HomeScreen(user: UserData, mainEvent: MainEventConfig) {
+    val db = FirebaseFirestore.getInstance()
     var showDialog by remember { mutableStateOf(false) }
     var newImageUrl by remember { mutableStateOf("") }
     var fullScreenImage by remember { mutableStateOf<String?>(null) }
+    var galleryImages by remember { mutableStateOf(emptyList<String>()) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    LaunchedEffect(mainEvent.id) {
+        db.collection("mainEvents").document(mainEvent.id).collection("gallery")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    galleryImages = snapshot.documents.mapNotNull { it.getString("url") }
+                }
+            }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -618,8 +728,8 @@ fun HomeScreen(user: UserData) {
             contentPadding = PaddingValues(horizontal = 4.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(globalGalleryImages.size) { index ->
-                val imageUrl = globalGalleryImages[index]
+            items(galleryImages.size) { index ->
+                val imageUrl = galleryImages[index]
                 AsyncImage(
                     model = imageUrl,
                     contentDescription = "Gallery Image",
@@ -649,7 +759,8 @@ fun HomeScreen(user: UserData) {
             confirmButton = {
                 Button(onClick = {
                     if (newImageUrl.isNotBlank()) {
-                        globalGalleryImages.add(newImageUrl)
+                        db.collection("mainEvents").document(mainEvent.id).collection("gallery")
+                            .add(mapOf("url" to newImageUrl))
                         newImageUrl = ""
                         showDialog = false
                     }
@@ -693,11 +804,10 @@ data class EventData(
     val qrCodeUrl: String
 )
 
-val globalEvents = mutableStateListOf<EventData>()
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EventsScreen(user: UserData) {
+fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
+    val db = FirebaseFirestore.getInstance()
     var showDialog by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
     var maxRegistration by remember { mutableStateOf("") }
@@ -706,12 +816,27 @@ fun EventsScreen(user: UserData) {
     var venue by remember { mutableStateOf("") }
     var qrCodeUrl by remember { mutableStateOf("") }
     var selectedEvent by remember { mutableStateOf<EventData?>(null) }
+    var eventsList by remember { mutableStateOf(emptyList<EventData>()) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    LaunchedEffect(mainEvent.id) {
+        db.collection("mainEvents").document(mainEvent.id).collection("events")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    eventsList = snapshot.documents.mapNotNull { doc ->
+                        EventData(
+                            title = doc.getString("title") ?: "",
+                            maxRegistration = doc.getString("maxRegistration") ?: "",
+                            price = doc.getString("price") ?: "",
+                            dateTime = doc.getString("dateTime") ?: "",
+                            venue = doc.getString("venue") ?: "",
+                            qrCodeUrl = doc.getString("qrCodeUrl") ?: ""
+                        )
+                    }
+                }
+            }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -735,8 +860,8 @@ fun EventsScreen(user: UserData) {
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(globalEvents.size) { index ->
-                val event = globalEvents[index]
+            items(eventsList.size) { index ->
+                val event = eventsList[index]
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -778,7 +903,16 @@ fun EventsScreen(user: UserData) {
             confirmButton = {
                 Button(onClick = {
                     if (title.isNotBlank()) {
-                        globalEvents.add(EventData(title, maxRegistration, price, dateTime, venue, qrCodeUrl))
+                        db.collection("mainEvents").document(mainEvent.id).collection("events").add(
+                            mapOf(
+                                "title" to title,
+                                "maxRegistration" to maxRegistration,
+                                "price" to price,
+                                "dateTime" to dateTime,
+                                "venue" to venue,
+                                "qrCodeUrl" to qrCodeUrl
+                            )
+                        )
                         title = ""
                         maxRegistration = ""
                         price = ""
