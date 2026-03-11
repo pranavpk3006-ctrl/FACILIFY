@@ -70,16 +70,64 @@ data class MainEventConfig(
 
 @Composable
 fun MainNavigation() {
+    val context = LocalContext.current
+    val sharedPref = remember { context.getSharedPreferences("FacilifyPrefs", android.content.Context.MODE_PRIVATE) }
     var loggedInUser by remember { mutableStateOf<UserData?>(null) }
     var selectedEvent by remember { mutableStateOf<MainEventConfig?>(null) }
+    var isInitialized by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val userName = sharedPref.getString("userName", null)
+        val userRole = sharedPref.getString("userRole", null)
+        val userRollNo = sharedPref.getString("userRollNo", null)
+        
+        if (userName != null && userRole != null && userRollNo != null) {
+            loggedInUser = UserData(userName, userRollNo, userRole)
+        }
+        
+        val eventId = sharedPref.getString("eventId", null)
+        val eventName = sharedPref.getString("eventName", null)
+        val eventImageUrl = sharedPref.getString("eventImageUrl", null)
+        
+        if (eventId != null && eventName != null) {
+            selectedEvent = MainEventConfig(eventId, eventName, eventImageUrl ?: "")
+        }
+        isInitialized = true
+    }
+
+    if (!isInitialized) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Color(0xFF2E7D32))
+        }
+        return
+    }
     
     if (loggedInUser == null) {
-        LoginScreen(onLoginSuccess = { user -> loggedInUser = user })
+        LoginScreen(onLoginSuccess = { user -> 
+            loggedInUser = user
+            sharedPref.edit().apply {
+                putString("userName", user.name)
+                putString("userRole", user.role)
+                putString("userRollNo", user.rollNo)
+                apply()
+            }
+        })
     } else if (selectedEvent == null) {
         EventSelectionScreen(
             user = loggedInUser!!, 
-            onEventSelected = { selectedEvent = it },
-            onLogout = { loggedInUser = null }
+            onEventSelected = { event -> 
+                selectedEvent = event
+                sharedPref.edit().apply {
+                    putString("eventId", event.id)
+                    putString("eventName", event.name)
+                    putString("eventImageUrl", event.imageUrl)
+                    apply()
+                }
+            },
+            onLogout = { 
+                loggedInUser = null
+                sharedPref.edit().clear().apply()
+            }
         )
     } else {
         FacilifyApp(
@@ -88,8 +136,18 @@ fun MainNavigation() {
             onLogout = { 
                 loggedInUser = null
                 selectedEvent = null
+                sharedPref.edit().clear().apply()
             },
-            onBackToEvents = { selectedEvent = null }
+            onBackToEvents = { 
+                selectedEvent = null 
+                sharedPref.edit().apply {
+                    remove("eventId")
+                    remove("eventName")
+                    remove("eventImageUrl")
+                    remove("selectedTab")
+                    apply()
+                }
+            }
         )
     }
 }
@@ -293,7 +351,8 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
 @Composable
 fun FacilifyApp(user: UserData, mainEvent: MainEventConfig, onLogout: () -> Unit, onBackToEvents: () -> Unit) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableStateOf(1) } // Default selected: Facility
+    val sharedPref = remember { context.getSharedPreferences("FacilifyPrefs", android.content.Context.MODE_PRIVATE) }
+    var selectedTab by remember { mutableStateOf(sharedPref.getInt("selectedTab", 1)) }
     var showNotifications by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -313,6 +372,7 @@ fun FacilifyApp(user: UserData, mainEvent: MainEventConfig, onLogout: () -> Unit
             BottomNavigationBar(selectedTab = selectedTab) { index ->
                 selectedTab = index
                 showNotifications = false
+                sharedPref.edit().putInt("selectedTab", index).apply()
             }
         }
     ) { paddingValues ->
