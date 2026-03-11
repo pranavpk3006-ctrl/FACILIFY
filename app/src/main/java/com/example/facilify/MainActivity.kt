@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -58,7 +59,8 @@ fun FacilifyTheme(content: @Composable () -> Unit) {
 
 data class MainEventConfig(
     val id: String = "",
-    val name: String = ""
+    val name: String = "",
+    val imageUrl: String = ""
 )
 
 @Composable
@@ -94,12 +96,17 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
     var events by remember { mutableStateOf(emptyList<MainEventConfig>()) }
     var showDialog by remember { mutableStateOf(false) }
     var newEventName by remember { mutableStateOf("") }
+    var newImageUrl by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         db.collection("mainEvents").addSnapshotListener { snapshot, _ ->
             if (snapshot != null) {
                 events = snapshot.documents.map { doc ->
-                    MainEventConfig(id = doc.id, name = doc.getString("name") ?: "")
+                    MainEventConfig(
+                        id = doc.id, 
+                        name = doc.getString("name") ?: "",
+                        imageUrl = doc.getString("imageUrl") ?: ""
+                    )
                 }
             }
         }
@@ -112,34 +119,69 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
                 Text("Logout")
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        if (user.role == "Admin") {
-            Button(
-                onClick = { showDialog = true }, 
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-            ) {
-                Text("+ Create New Event Group")
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        Spacer(modifier = Modifier.height(32.dp))
 
-        LazyColumn {
-            items(events) { event ->
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable { onEventSelected(event) },
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+        // Grid for events and +Add button
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(32.dp),
+            contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp)
+        ) {
+            items(events.size) { index ->
+                val event = events[index]
+                Column(
+                    modifier = Modifier.clickable { onEventSelected(event) },
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(event.name, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                    Box(
+                        modifier = Modifier
+                            .size(120.dp)
+                            .clip(CircleShape)
+                            .background(Color.LightGray)
+                    ) {
+                        if (event.imageUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = event.imageUrl,
+                                contentDescription = "Event Image",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(Icons.Default.Event, contentDescription = "Event", modifier = Modifier.align(Alignment.Center).size(60.dp), tint = Color.Gray)
+                        }
                         if (user.role == "Admin") {
-                            IconButton(onClick = {
-                                db.collection("mainEvents").document(event.id).delete()
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
+                            IconButton(
+                                onClick = { db.collection("mainEvents").document(event.id).delete() },
+                                modifier = Modifier.align(Alignment.TopEnd).background(Color.White, CircleShape).size(28.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red, modifier = Modifier.size(16.dp))
                             }
                         }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(event.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+                }
+            }
+
+            if (user.role == "Admin") {
+                item {
+                    Column(
+                        modifier = Modifier.clickable { showDialog = true },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(120.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFE8F5E9)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add Event", tint = Color(0xFF2E7D32), modifier = Modifier.size(60.dp))
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Add Event", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2E7D32))
                     }
                 }
             }
@@ -151,14 +193,19 @@ fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> U
             onDismissRequest = { showDialog = false },
             title = { Text("New Event Group") },
             text = {
-                OutlinedTextField(value = newEventName, onValueChange = { newEventName = it }, label = { Text("Name") })
+                Column {
+                    OutlinedTextField(value = newEventName, onValueChange = { newEventName = it }, label = { Text("Name") }, singleLine = true)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = newImageUrl, onValueChange = { newImageUrl = it }, label = { Text("Profile Image URL") }, singleLine = true)
+                }
             },
             confirmButton = {
                 Button(onClick = {
                     if (newEventName.isNotBlank()) {
                         val docRef = db.collection("mainEvents").document()
-                        docRef.set(mapOf("name" to newEventName))
+                        docRef.set(mapOf("name" to newEventName, "imageUrl" to newImageUrl))
                         newEventName = ""
+                        newImageUrl = ""
                         showDialog = false
                     }
                 }) { Text("Create") }
