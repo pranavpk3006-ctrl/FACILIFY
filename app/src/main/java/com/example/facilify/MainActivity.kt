@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,8 +27,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
-
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import java.util.UUID
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,27 +62,297 @@ fun FacilifyTheme(content: @Composable () -> Unit) {
     )
 }
 
-@Composable
-fun MainNavigation() {
-    var loggedInUser by remember { mutableStateOf<UserData?>(null) }
-    
-    if (loggedInUser == null) {
-        LoginScreen(onLoginSuccess = { user -> loggedInUser = user })
-    } else {
-        FacilifyApp(user = loggedInUser!!, onLogout = { loggedInUser = null })
-    }
-}
-
-val globalGalleryImages = mutableStateListOf(
-    "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=600&h=400",
-    "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=600&h=400",
-    "https://images.unsplash.com/photo-1581093458791-9f3c3900df4b?auto=format&fit=crop&q=80&w=600&h=400"
+data class MainEventConfig(
+    val id: String = "",
+    val name: String = "",
+    val imageUrl: String = ""
 )
 
 @Composable
-fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
+fun MainNavigation() {
     val context = LocalContext.current
-    var selectedTab by remember { mutableStateOf(1) } // Default selected: Facility
+    val sharedPref = remember { context.getSharedPreferences("FacilifyPrefs", android.content.Context.MODE_PRIVATE) }
+    var loggedInUser by remember { mutableStateOf<UserData?>(null) }
+    var selectedEvent by remember { mutableStateOf<MainEventConfig?>(null) }
+    var isInitialized by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val userName = sharedPref.getString("userName", null)
+        val userRole = sharedPref.getString("userRole", null)
+        val userRollNo = sharedPref.getString("userRollNo", null)
+        
+        if (userName != null && userRole != null && userRollNo != null) {
+            loggedInUser = UserData(userName, userRollNo, userRole)
+        }
+        
+        val eventId = sharedPref.getString("eventId", null)
+        val eventName = sharedPref.getString("eventName", null)
+        val eventImageUrl = sharedPref.getString("eventImageUrl", null)
+        
+        if (eventId != null && eventName != null) {
+            selectedEvent = MainEventConfig(eventId, eventName, eventImageUrl ?: "")
+        }
+        isInitialized = true
+    }
+
+    if (!isInitialized) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Color(0xFF2E7D32))
+        }
+        return
+    }
+    
+    if (loggedInUser == null) {
+        LoginScreen(onLoginSuccess = { user -> 
+            loggedInUser = user
+            sharedPref.edit().apply {
+                putString("userName", user.name)
+                putString("userRole", user.role)
+                putString("userRollNo", user.rollNo)
+                apply()
+            }
+        })
+    } else if (selectedEvent == null) {
+        EventSelectionScreen(
+            user = loggedInUser!!, 
+            onEventSelected = { event -> 
+                selectedEvent = event
+                sharedPref.edit().apply {
+                    putString("eventId", event.id)
+                    putString("eventName", event.name)
+                    putString("eventImageUrl", event.imageUrl)
+                    apply()
+                }
+            },
+            onLogout = { 
+                loggedInUser = null
+                sharedPref.edit().clear().apply()
+            }
+        )
+    } else {
+        FacilifyApp(
+            user = loggedInUser!!, 
+            mainEvent = selectedEvent!!, 
+            onLogout = { 
+                loggedInUser = null
+                selectedEvent = null
+                sharedPref.edit().clear().apply()
+            },
+            onBackToEvents = { 
+                selectedEvent = null 
+                sharedPref.edit().apply {
+                    remove("eventId")
+                    remove("eventName")
+                    remove("eventImageUrl")
+                    remove("selectedTab")
+                    apply()
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EventSelectionScreen(user: UserData, onEventSelected: (MainEventConfig) -> Unit, onLogout: () -> Unit) {
+    val db = FirebaseFirestore.getInstance()
+    var events by remember { mutableStateOf(emptyList<MainEventConfig>()) }
+    var showDialog by remember { mutableStateOf(false) }
+    var newEventName by remember { mutableStateOf("") }
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var editingEvent by remember { mutableStateOf<MainEventConfig?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
+
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        imageUri = uri
+    }
+
+    LaunchedEffect(Unit) {
+        db.collection("mainEvents").addSnapshotListener { snapshot, _ ->
+            if (snapshot != null) {
+                events = snapshot.documents.map { doc ->
+                    MainEventConfig(
+                        id = doc.id, 
+                        name = doc.getString("name") ?: "",
+                        imageUrl = doc.getString("imageUrl") ?: ""
+                    )
+                }
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Select Event", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Button(onClick = onLogout, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                Text("Logout")
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Grid for events and +Add button
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(32.dp),
+            contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp)
+        ) {
+            items(events.size) { index ->
+                val event = events[index]
+                var menuExpanded by remember { mutableStateOf(false) }
+                Column(
+                    modifier = Modifier.clickable { onEventSelected(event) },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(120.dp)
+                            .clip(CircleShape)
+                            .background(Color.LightGray)
+                    ) {
+                        if (event.imageUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = event.imageUrl,
+                                contentDescription = "Event Image",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(Icons.Default.Event, contentDescription = "Event", modifier = Modifier.align(Alignment.Center).size(60.dp), tint = Color.Gray)
+                        }
+                        if (user.role == "Admin") {
+                            Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                                IconButton(
+                                    onClick = { menuExpanded = true },
+                                    modifier = Modifier.background(Color.White, CircleShape).size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.Black, modifier = Modifier.size(16.dp))
+                                }
+                                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                                    DropdownMenuItem(text = { Text("Edit") }, onClick = {
+                                        menuExpanded = false
+                                        editingEvent = event
+                                        newEventName = event.name
+                                        imageUri = null
+                                        showDialog = true
+                                    })
+                                    DropdownMenuItem(text = { Text("Delete", color = Color.Red) }, onClick = {
+                                        menuExpanded = false
+                                        db.collection("mainEvents").document(event.id).delete()
+                                    })
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(event.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+                }
+            }
+
+            if (user.role == "Admin") {
+                item {
+                    Column(
+                        modifier = Modifier.clickable { 
+                            editingEvent = null
+                            newEventName = ""
+                            imageUri = null
+                            showDialog = true 
+                        },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(120.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFE8F5E9)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add Event", tint = Color(0xFF2E7D32), modifier = Modifier.size(60.dp))
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Add Event", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2E7D32))
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        val titleText = if (editingEvent != null) "Edit Event Group" else "New Event Group"
+        AlertDialog(
+            onDismissRequest = { if (!isUploading) showDialog = false },
+            title = { Text(titleText) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newEventName, 
+                        onValueChange = { newEventName = it }, 
+                        label = { Text("Name") }, 
+                        singleLine = true,
+                        enabled = !isUploading
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { imageLauncher.launch("image/*") }, 
+                        enabled = !isUploading,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
+                    ) {
+                        Text(if (imageUri != null) "Image Selected" else "Select Profile Photo")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !isUploading,
+                    onClick = {
+                        if (newEventName.isNotBlank() && !isUploading) {
+                            isUploading = true
+                            if (imageUri != null) {
+                                val storageRef = FirebaseStorage.getInstance().reference.child("events/${UUID.randomUUID()}")
+                                storageRef.putFile(imageUri!!).continueWithTask { task ->
+                                    if (!task.isSuccessful) task.exception?.let { throw it }
+                                    storageRef.downloadUrl
+                                }.addOnCompleteListener { task ->
+                                    if (task.isSuccessful) {
+                                        val url = task.result.toString()
+                                        if (editingEvent != null) {
+                                            db.collection("mainEvents").document(editingEvent!!.id).update(mapOf("name" to newEventName, "imageUrl" to url))
+                                        } else {
+                                            db.collection("mainEvents").add(mapOf("name" to newEventName, "imageUrl" to url))
+                                        }
+                                        showDialog = false
+                                        isUploading = false
+                                    } else {
+                                        isUploading = false
+                                    }
+                                }
+                            } else {
+                                val url = editingEvent?.imageUrl ?: ""
+                                if (editingEvent != null) {
+                                    db.collection("mainEvents").document(editingEvent!!.id).update(mapOf("name" to newEventName, "imageUrl" to url))
+                                } else {
+                                    db.collection("mainEvents").add(mapOf("name" to newEventName, "imageUrl" to url))
+                                }
+                                showDialog = false
+                                isUploading = false
+                            }
+                        }
+                    }
+                ) { Text(if (isUploading) "Saving..." else "Save") }
+            },
+            dismissButton = { 
+                TextButton(onClick = { if (!isUploading) showDialog = false }) { Text("Cancel") } 
+            }
+        )
+    }
+}
+
+@Composable
+fun FacilifyApp(user: UserData, mainEvent: MainEventConfig, onLogout: () -> Unit, onBackToEvents: () -> Unit) {
+    val context = LocalContext.current
+    val sharedPref = remember { context.getSharedPreferences("FacilifyPrefs", android.content.Context.MODE_PRIVATE) }
+    var selectedTab by remember { mutableStateOf(sharedPref.getInt("selectedTab", 1)) }
     var showNotifications by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -84,8 +360,10 @@ fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
             if (!showNotifications) {
                 TopBar(
                     user = user, 
+                    mainEvent = mainEvent,
                     onNotificationClick = { showNotifications = true }, 
                     onLogout = onLogout,
+                    onBackClick = onBackToEvents,
                     modifier = Modifier.background(Color(0xFFF5F5F7)).padding(horizontal = 16.dp)
                 )
             }
@@ -94,6 +372,7 @@ fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
             BottomNavigationBar(selectedTab = selectedTab) { index ->
                 selectedTab = index
                 showNotifications = false
+                sharedPref.edit().putInt("selectedTab", index).apply()
             }
         }
     ) { paddingValues ->
@@ -106,11 +385,11 @@ fun FacilifyApp(user: UserData, onLogout: () -> Unit) {
             if (showNotifications) {
                 NotificationsScreen(onBack = { showNotifications = false })
             } else if (selectedTab == 0) { // Home Screen content
-                HomeScreen(user = user)
+                HomeScreen(user = user, mainEvent = mainEvent)
             } else if (selectedTab == 1) { // Render Facility screen content
                 FacilityScreen()
             } else if (selectedTab == 3) {
-                EventsScreen(user = user)
+                EventsScreen(user = user, mainEvent = mainEvent)
             } else {
                 // Placeholder for other screens
                 val tabNames = listOf("Home", "Facility", "Team", "Events")
@@ -149,7 +428,7 @@ fun FacilityScreen() {
 }
 
 @Composable
-fun TopBar(user: UserData, onNotificationClick: () -> Unit = {}, onLogout: () -> Unit = {}, modifier: Modifier = Modifier) {
+fun TopBar(user: UserData, mainEvent: MainEventConfig, onNotificationClick: () -> Unit = {}, onLogout: () -> Unit = {}, onBackClick: () -> Unit = {}, modifier: Modifier = Modifier) {
     var profileMenuExpanded by remember { mutableStateOf(false) }
 
     Row(
@@ -159,8 +438,38 @@ fun TopBar(user: UserData, onNotificationClick: () -> Unit = {}, onLogout: () ->
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left side profile photo & username
+        // Left side Back Button & Text
         Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBackClick) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.Black)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(mainEvent.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                val welcomeText = if (user.role == "Admin") "Admin: ${user.name}" else "User: ${user.name}"
+                Text(welcomeText, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.Gray)
+            }
+        }
+        
+        // Right side Notifications & Profile
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.clickable { onNotificationClick() }) {
+                Icon(
+                    imageVector = Icons.Outlined.Notifications,
+                    contentDescription = "Notifications",
+                    modifier = Modifier.size(28.dp),
+                    tint = Color.Black
+                )
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(Color.Red)
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-2).dp, y = 2.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
             Box {
                 Box(
                     modifier = Modifier
@@ -186,30 +495,6 @@ fun TopBar(user: UserData, onNotificationClick: () -> Unit = {}, onLogout: () ->
                     })
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            val welcomeText = if (user.role == "Admin") "HI ADMIN" else "HI USER"
-            Column {
-                Text(welcomeText, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
-                Text(user.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.Black)
-            }
-        }
-        
-        // Right side Notifications icon
-        Box(modifier = Modifier.clickable { onNotificationClick() }) {
-            Icon(
-                imageVector = Icons.Outlined.Notifications,
-                contentDescription = "Notifications",
-                modifier = Modifier.size(28.dp),
-                tint = Color.Black
-            )
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(Color.Red)
-                    .align(Alignment.TopEnd)
-                    .offset(x = (-2).dp, y = 2.dp)
-            )
         }
     }
 }
@@ -586,16 +871,23 @@ fun LoginScreen(onLoginSuccess: (UserData) -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(user: UserData) {
+fun HomeScreen(user: UserData, mainEvent: MainEventConfig) {
+    val db = FirebaseFirestore.getInstance()
     var showDialog by remember { mutableStateOf(false) }
     var newImageUrl by remember { mutableStateOf("") }
     var fullScreenImage by remember { mutableStateOf<String?>(null) }
+    var galleryImages by remember { mutableStateOf(emptyList<String>()) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    LaunchedEffect(mainEvent.id) {
+        db.collection("mainEvents").document(mainEvent.id).collection("gallery")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    galleryImages = snapshot.documents.mapNotNull { it.getString("url") }
+                }
+            }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -620,8 +912,8 @@ fun HomeScreen(user: UserData) {
             contentPadding = PaddingValues(horizontal = 4.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(globalGalleryImages.size) { index ->
-                val imageUrl = globalGalleryImages[index]
+            items(galleryImages.size) { index ->
+                val imageUrl = galleryImages[index]
                 AsyncImage(
                     model = imageUrl,
                     contentDescription = "Gallery Image",
@@ -651,7 +943,8 @@ fun HomeScreen(user: UserData) {
             confirmButton = {
                 Button(onClick = {
                     if (newImageUrl.isNotBlank()) {
-                        globalGalleryImages.add(newImageUrl)
+                        db.collection("mainEvents").document(mainEvent.id).collection("gallery")
+                            .add(mapOf("url" to newImageUrl))
                         newImageUrl = ""
                         showDialog = false
                     }
@@ -687,6 +980,7 @@ fun HomeScreen(user: UserData) {
 }
 
 data class EventData(
+    val id: String = "",
     val title: String,
     val maxRegistration: String,
     val registrationFee: String,
@@ -697,11 +991,10 @@ data class EventData(
     val qrCodeUrl: String
 )
 
-val globalEvents = mutableStateListOf<EventData>()
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EventsScreen(user: UserData) {
+fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
+    val db = FirebaseFirestore.getInstance()
     var showDialog by remember { mutableStateOf(false) }
     var editingEventIndex by remember { mutableStateOf<Int?>(null) }
     var title by remember { mutableStateOf("") }
@@ -713,12 +1006,30 @@ fun EventsScreen(user: UserData) {
     var description by remember { mutableStateOf("") }
     var qrCodeUrl by remember { mutableStateOf("") }
     var selectedEvent by remember { mutableStateOf<EventData?>(null) }
+    var eventsList by remember { mutableStateOf(emptyList<EventData>()) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    LaunchedEffect(mainEvent.id) {
+        db.collection("mainEvents").document(mainEvent.id).collection("events")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    eventsList = snapshot.documents.mapNotNull { doc ->
+                        EventData(
+                            id = doc.id,
+                            title = doc.getString("title") ?: "",
+                            maxRegistration = doc.getString("maxRegistration") ?: "",
+                            registrationFee = doc.getString("registrationFee") ?: "",
+                            date = doc.getString("date") ?: "",
+                            time = doc.getString("time") ?: "",
+                            venue = doc.getString("venue") ?: "",
+                            description = doc.getString("description") ?: "",
+                            qrCodeUrl = doc.getString("qrCodeUrl") ?: ""
+                        )
+                    }
+                }
+            }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -753,10 +1064,9 @@ fun EventsScreen(user: UserData) {
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(globalEvents.size) { index ->
-                val event = globalEvents[index]
+            items(eventsList.size) { index ->
+                val event = eventsList[index]
                 var expandedMenu by remember { mutableStateOf(false) }
-                
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -807,7 +1117,8 @@ fun EventsScreen(user: UserData) {
                                         text = { Text("Delete Event", color = Color.Red) }, 
                                         onClick = { 
                                             expandedMenu = false
-                                            globalEvents.removeAt(index)
+                                            db.collection("mainEvents").document(mainEvent.id)
+                                                .collection("events").document(event.id).delete()
                                         }
                                     )
                                 }
@@ -863,13 +1174,24 @@ fun EventsScreen(user: UserData) {
             confirmButton = {
                 Button(onClick = {
                     if (title.isNotBlank()) {
-                        val newEvent = EventData(title, maxRegistration, registrationFee, date, time, venue, description, qrCodeUrl)
+                        val eventMap = mapOf(
+                            "title" to title,
+                            "maxRegistration" to maxRegistration,
+                            "registrationFee" to registrationFee,
+                            "date" to date,
+                            "time" to time,
+                            "venue" to venue,
+                            "description" to description,
+                            "qrCodeUrl" to qrCodeUrl
+                        )
                         if (editingEventIndex != null) {
-                            globalEvents[editingEventIndex!!] = newEvent
+                            val eventId = eventsList[editingEventIndex!!].id
+                            db.collection("mainEvents").document(mainEvent.id)
+                                .collection("events").document(eventId).update(eventMap as Map<String, Any>)
                         } else {
-                            globalEvents.add(newEvent)
+                            db.collection("mainEvents").document(mainEvent.id)
+                                .collection("events").add(eventMap)
                         }
-                        
                         title = ""
                         maxRegistration = ""
                         registrationFee = ""
@@ -944,4 +1266,3 @@ fun EventsScreen(user: UserData) {
         )
     }
 }
->>>>>>> 7cf440e68b92fc9888f4349f8ab0c4a55820e11c
