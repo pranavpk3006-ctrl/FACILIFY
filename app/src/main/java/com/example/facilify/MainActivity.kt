@@ -387,7 +387,7 @@ fun FacilifyApp(user: UserData, mainEvent: MainEventConfig, onLogout: () -> Unit
             } else if (selectedTab == 0) { // Home Screen content
                 HomeScreen(user = user, mainEvent = mainEvent)
             } else if (selectedTab == 1) { // Render Facility screen content
-                FacilityScreen()
+                FacilityScreen(user = user, mainEvent = mainEvent)
             } else if (selectedTab == 3) {
                 EventsScreen(user = user, mainEvent = mainEvent)
             } else {
@@ -402,27 +402,71 @@ fun FacilifyApp(user: UserData, mainEvent: MainEventConfig, onLogout: () -> Unit
 }
 
 @Composable
-fun FacilityScreen() {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp)
+fun FacilityScreen(user: UserData, mainEvent: MainEventConfig) {
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    
+    if (selectedCategory == null) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Text("Facilities", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            val categories = listOf("Transportation", "Hostel", "Food", "Trip")
+            
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(categories.size) { index ->
+                    val category = categories[index]
+                    val icon = when (category) {
+                        "Transportation" -> Icons.Outlined.DirectionsBus
+                        "Hostel" -> Icons.Outlined.Hotel
+                        "Food" -> Icons.Outlined.Restaurant
+                        "Trip" -> Icons.Outlined.Flight
+                        else -> Icons.Outlined.Business
+                    }
+                    FacilityCategoryCard(title = category, icon = icon) {
+                        selectedCategory = category
+                    }
+                }
+            }
+        }
+    } else {
+        FacilityCategoryDetailsScreen(
+            category = selectedCategory!!, 
+            user = user, 
+            mainEvent = mainEvent, 
+            onBack = { selectedCategory = null }
+        )
+    }
+}
+
+@Composable
+fun FacilityCategoryCard(title: String, icon: ImageVector, onClick: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onClick() }
     ) {
-
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-        item { SearchBar() }
-        item { Spacer(modifier = Modifier.height(24.dp)) }
-        item { Text("Explore Facilities", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-        item { ExploreFacilitiesGrid() }
-        item { Spacer(modifier = Modifier.height(24.dp)) }
-        item { Text("Book Your Space", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-
-        // Setup Dummy Data for Spaces list
-        items(getDummySpaces()) { space ->
-            SpaceCard(space = space)
-            Spacer(modifier = Modifier.height(12.dp))
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+             Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE8F5E9)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = icon, contentDescription = title, tint = Color(0xFF2E7D32), modifier = Modifier.size(32.dp))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(text = title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = Color.Black)
         }
     }
 }
@@ -501,181 +545,306 @@ fun TopBar(user: UserData, mainEvent: MainEventConfig, onNotificationClick: () -
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SearchBar() {
-    val context = LocalContext.current
-    var query by remember { mutableStateOf("") }
+fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: MainEventConfig, onBack: () -> Unit) {
+    val db = FirebaseFirestore.getInstance()
+    var showDialog by remember { mutableStateOf(false) }
+    var editingItemIndex by remember { mutableStateOf<Int?>(null) }
+    var title by remember { mutableStateOf("") }
+    var maxCapacity by remember { mutableStateOf("") }
+    var fee by remember { mutableStateOf("") }
+    var date by remember { mutableStateOf("") }
+    var time by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var imageUrl by remember { mutableStateOf("") }
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
 
-    OutlinedTextField(
-        value = query,
-        onValueChange = { query = it },
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { Toast.makeText(context, "Search clicked!", Toast.LENGTH_SHORT).show() },
-        placeholder = { Text("Search rooms, equipment, booking...", color = Color.Gray) },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Gray) },
-        shape = RoundedCornerShape(12.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            unfocusedContainerColor = Color.White,
-            focusedContainerColor = Color.White,
-            unfocusedBorderColor = Color.LightGray,
-            focusedBorderColor = Color(0xFF2E7D32)
-        ),
-        singleLine = true
-    )
-}
-
-@Composable
-fun ExploreFacilitiesGrid() {
-    val context = LocalContext.current
-
-    Column {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            FacilityCategoryItem(
-                title = "Workspace",
-                icon = Icons.Outlined.Computer,
-                imageUrl = "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=200&h=150",
-                modifier = Modifier.weight(1f),
-                onClick = { Toast.makeText(context, "Workspace clicked!", Toast.LENGTH_SHORT).show() }
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            FacilityCategoryItem(
-                title = "Gym & Fitness",
-                icon = Icons.Outlined.FitnessCenter,
-                imageUrl = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=150",
-                modifier = Modifier.weight(1f),
-                onClick = { Toast.makeText(context, "Gym & Fitness clicked!", Toast.LENGTH_SHORT).show() }
-            )
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            FacilityCategoryItem(
-                title = "Conference Rooms",
-                icon = Icons.Outlined.Groups,
-                imageUrl = "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&q=80&w=200&h=150",
-                modifier = Modifier.weight(1f),
-                onClick = { Toast.makeText(context, "Conference Rooms clicked!", Toast.LENGTH_SHORT).show() }
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            FacilityCategoryItem(
-                title = "Labs & Tech",
-                icon = Icons.Outlined.Science,
-                imageUrl = "https://images.unsplash.com/photo-1581093458791-9f3c3900df4b?auto=format&fit=crop&q=80&w=200&h=150",
-                modifier = Modifier.weight(1f),
-                onClick = { Toast.makeText(context, "Labs & Tech clicked!", Toast.LENGTH_SHORT).show() }
-            )
-        }
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        imageUri = uri
     }
-}
+    var selectedItem by remember { mutableStateOf<FacilityItemData?>(null) }
+    var itemsList by remember { mutableStateOf(emptyList<FacilityItemData>()) }
 
-@Composable
-fun FacilityCategoryItem(title: String, icon: ImageVector, imageUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(
-        modifier = modifier
-            .height(110.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() }
-    ) {
-        AsyncImage(
-            model = imageUrl,
-            contentDescription = title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
-        // Dark overlay for text visibility
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)))
-
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFC8E6C9)), // Light green
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(imageVector = icon, contentDescription = title, tint = Color(0xFF2E7D32))
+    LaunchedEffect(mainEvent.id, category) {
+        db.collection("mainEvents").document(mainEvent.id).collection("facilities_${category.lowercase()}")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    itemsList = snapshot.documents.mapNotNull { doc ->
+                        FacilityItemData(
+                            id = doc.id,
+                            title = doc.getString("title") ?: "",
+                            maxCapacity = doc.getString("maxCapacity") ?: "",
+                            fee = doc.getString("fee") ?: "",
+                            date = doc.getString("date") ?: "",
+                            time = doc.getString("time") ?: "",
+                            location = doc.getString("location") ?: "",
+                            description = doc.getString("description") ?: "",
+                            imageUrl = doc.getString("imageUrl") ?: ""
+                        )
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-        }
     }
-}
 
-@Composable
-fun SpaceCard(space: SpaceData) {
-    val context = LocalContext.current
-
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth().clickable { Toast.makeText(context, "Clicked ${space.title}", Toast.LENGTH_SHORT).show() }
-    ) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = space.imageUrl,
-                contentDescription = space.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(70.dp)
-                    .clip(RoundedCornerShape(12.dp))
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = space.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
-                Text(text = space.subtitle, color = Color.Gray, fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = Icons.Default.CalendarToday, contentDescription = "Date", modifier = Modifier.size(14.dp), tint = Color.Gray)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = space.info, color = Color.Gray, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.Black)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(category, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            }
+            if (user.role == "Admin") {
+                Button(
+                    onClick = { 
+                        editingItemIndex = null
+                        title = ""
+                        maxCapacity = ""
+                        fee = ""
+                        date = ""
+                        time = ""
+                        location = ""
+                        description = ""
+                        imageUrl = ""
+                        imageUri = null
+                        showDialog = true 
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("+ Add Item", color = Color.White, fontSize = 12.sp)
                 }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Box(
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(itemsList.size) { index ->
+                val item = itemsList[index]
+                var expandedMenu by remember { mutableStateOf(false) }
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     modifier = Modifier
-                        .background(
-                            color = if (space.isAvailable) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .fillMaxWidth()
+                        .clickable { selectedItem = item }
                 ) {
-                    Text(
-                        text = if (space.isAvailable) "Available" else "Booked",
-                        color = if (space.isAvailable) Color(0xFF2E7D32) else Color(0xFFC62828),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                if (space.isAvailable) {
-                    OutlinedButton(
-                        onClick = { Toast.makeText(context, "Viewing details for ${space.title}", Toast.LENGTH_SHORT).show() },
-                        modifier = Modifier.height(32.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1565C0)), // Blue Text
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1565C0))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
                     ) {
-                        Text("Details", fontSize = 12.sp)
-                    }
-                } else {
-                    Button(
-                        onClick = { Toast.makeText(context, "Booking ${space.title}", Toast.LENGTH_SHORT).show() },
-                        modifier = Modifier.height(32.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)) // Blue Button
-                    ) {
-                        Text("Book Now", fontSize = 12.sp, color = Color.White)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("${item.date} at ${item.time}", fontSize = 14.sp, color = Color.Gray)
+                            Text(item.location, fontSize = 14.sp, color = Color.Gray)
+                        }
+                        
+                        if (user.role == "Admin") {
+                            Box {
+                                IconButton(onClick = { expandedMenu = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = Color.Gray)
+                                }
+                                DropdownMenu(
+                                    expanded = expandedMenu,
+                                    onDismissRequest = { expandedMenu = false },
+                                    modifier = Modifier.background(Color.White)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Edit Item", color = Color.Black) }, 
+                                        onClick = { 
+                                            expandedMenu = false
+                                            editingItemIndex = index
+                                            title = item.title
+                                            maxCapacity = item.maxCapacity
+                                            fee = item.fee
+                                            date = item.date
+                                            time = item.time
+                                            location = item.location
+                                            description = item.description
+                                            imageUrl = item.imageUrl
+                                            imageUri = null
+                                            showDialog = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Delete Item", color = Color.Red) }, 
+                                        onClick = { 
+                                            expandedMenu = false
+                                            db.collection("mainEvents").document(mainEvent.id)
+                                                .collection("facilities_${category.lowercase()}").document(item.id).delete()
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isUploading) showDialog = false },
+            title = { Text(if (editingItemIndex != null) "Edit Detail" else "Add New Detail") },
+            text = {
+                LazyColumn(modifier = Modifier.padding(8.dp)) {
+                    item { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = maxCapacity, onValueChange = { maxCapacity = it }, label = { Text("Max Capacity (e.g., 50)") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = fee, onValueChange = { fee = it }, label = { Text("Fee (e.g., Free, $50)") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Date") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = time, onValueChange = { time = it }, label = { Text("Time") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Location") }, singleLine = true) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item {
+                        val wordCount = description.split("\\s+".toRegex()).count { it.isNotEmpty() }
+                        OutlinedTextField(
+                            value = description,
+                            onValueChange = { 
+                                val newWordCount = it.split("\\s+".toRegex()).count { word -> word.isNotEmpty() }
+                                if (newWordCount <= 500) {
+                                    description = it 
+                                }
+                            },
+                            label = { Text("Description") },
+                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                            maxLines = 5,
+                            supportingText = { Text("$wordCount/500 words") }
+                        )
+                    }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { 
+                        Button(
+                            onClick = { imageLauncher.launch("image/*") }, 
+                            enabled = !isUploading,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
+                        ) {
+                            Text(if (imageUri != null) "Image Selected" else if (imageUrl.isNotBlank()) "Change Image" else "Select Image")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !isUploading,
+                    onClick = {
+                    if (title.isNotBlank() && !isUploading) {
+                        isUploading = true
+                        val saveItem = { finalUrl: String ->
+                            val itemMap = mapOf(
+                                "title" to title,
+                                "maxCapacity" to maxCapacity,
+                                "fee" to fee,
+                                "date" to date,
+                                "time" to time,
+                                "location" to location,
+                                "description" to description,
+                                "imageUrl" to finalUrl
+                            )
+                            if (editingItemIndex != null) {
+                                val itemId = itemsList[editingItemIndex!!].id
+                                db.collection("mainEvents").document(mainEvent.id)
+                                    .collection("facilities_${category.lowercase()}").document(itemId).update(itemMap as Map<String, Any>)
+                            } else {
+                                db.collection("mainEvents").document(mainEvent.id)
+                                    .collection("facilities_${category.lowercase()}").add(itemMap)
+                            }
+                            isUploading = false
+                            showDialog = false
+                        }
+
+                        if (imageUri != null) {
+                            val storageRef = FirebaseStorage.getInstance().reference.child("facilities_img/${UUID.randomUUID()}")
+                            storageRef.putFile(imageUri!!).continueWithTask { task ->
+                                if (!task.isSuccessful) task.exception?.let { throw it }
+                                storageRef.downloadUrl
+                            }.addOnCompleteListener { task ->
+                                if (task.isSuccessful) {
+                                    saveItem(task.result.toString())
+                                } else {
+                                    isUploading = false
+                                }
+                            }
+                        } else {
+                            saveItem(imageUrl)
+                        }
+                    }
+                }) {
+                    Text(if (isUploading) "Saving..." else if (editingItemIndex != null) "Save" else "Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    if (!isUploading) {
+                        showDialog = false 
+                    }
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (selectedItem != null) {
+        AlertDialog(
+            onDismissRequest = { selectedItem = null },
+            title = { Text(selectedItem!!.title, fontWeight = FontWeight.Bold) },
+            text = {
+                LazyColumn(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    item { Text("Max Capacity: ${selectedItem!!.maxCapacity}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Fee: ${selectedItem!!.fee}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Date: ${selectedItem!!.date}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Time: ${selectedItem!!.time}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Text("Location: ${selectedItem!!.location}", color = Color.Black) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    if (selectedItem!!.description.isNotBlank()) {
+                        item { Text("Description:", fontWeight = FontWeight.Medium, color = Color.Black) }
+                        item { Spacer(modifier = Modifier.height(4.dp)) }
+                        item { Text(selectedItem!!.description, color = Color.DarkGray, fontSize = 14.sp) }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
+                    }
+                    if (selectedItem!!.imageUrl.isNotBlank()) {
+                        item { Text("Image:", fontWeight = FontWeight.Medium, color = Color.Black) }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                        item {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                AsyncImage(
+                                    model = selectedItem!!.imageUrl,
+                                    contentDescription = "Item Image",
+                                    modifier = Modifier.size(200.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { selectedItem = null }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 
@@ -711,53 +880,17 @@ fun BottomNavigationBar(selectedTab: Int, onTabSelected: (Int) -> Unit) {
 }
 
 // Data Model & Dummy Data
-data class SpaceData(
+data class FacilityItemData(
+    val id: String = "",
     val title: String,
-    val subtitle: String,
-    val info: String,
-    val imageUrl: String,
-    val isAvailable: Boolean
+    val maxCapacity: String,
+    val fee: String,
+    val date: String,
+    val time: String,
+    val location: String,
+    val description: String,
+    val imageUrl: String
 )
-
-fun getDummySpaces(): List<SpaceData> {
-    return listOf(
-        SpaceData(
-            title = "The Innovation Lab",
-            subtitle = "Workspace",
-            info = "Stars • 7.51 mm",
-            imageUrl = "https://images.unsplash.com/photo-1497366216548-37526070297c?w=150&h=150&fit=crop",
-            isAvailable = true
-        ),
-        SpaceData(
-            title = "Boardroom A",
-            subtitle = "Co-working Room",
-            info = "1 day • Ad",
-            imageUrl = "https://images.unsplash.com/photo-1497366811353-6870744d04b2?w=150&h=150&fit=crop",
-            isAvailable = false
-        ),
-        SpaceData(
-            title = "Co-working Hot Desk",
-            subtitle = "Vröskoping",
-            info = "Stace • 7.00 mm",
-            imageUrl = "https://images.unsplash.com/photo-1593642632823-8f785ba67e45?w=150&h=150&fit=crop",
-            isAvailable = true
-        ),
-        SpaceData(
-            title = "Creative Studio",
-            subtitle = "Creative Studio",
-            info = "Stace • 7.00 mm",
-            imageUrl = "https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=150&h=150&fit=crop",
-            isAvailable = true
-        ),
-        SpaceData(
-            title = "Team Suite",
-            subtitle = "Team Suite",
-            info = "Teams • 1 Week",
-            imageUrl = "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&h=150&fit=crop",
-            isAvailable = true
-        )
-    )
-}
 
 
 @Composable
