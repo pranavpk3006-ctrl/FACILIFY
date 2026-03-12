@@ -1005,6 +1005,12 @@ fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
     var venue by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var qrCodeUrl by remember { mutableStateOf("") }
+    var qrImageUri by remember { mutableStateOf<Uri?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
+
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        qrImageUri = uri
+    }
     var selectedEvent by remember { mutableStateOf<EventData?>(null) }
     var eventsList by remember { mutableStateOf(emptyList<EventData>()) }
 
@@ -1048,6 +1054,7 @@ fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
                         venue = ""
                         description = ""
                         qrCodeUrl = ""
+                        qrImageUri = null
                         showDialog = true 
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
@@ -1110,6 +1117,7 @@ fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
                                             venue = event.venue
                                             description = event.description
                                             qrCodeUrl = event.qrCodeUrl
+                                            qrImageUri = null
                                             showDialog = true
                                         }
                                     )
@@ -1132,7 +1140,7 @@ fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
 
     if (showDialog) {
         AlertDialog(
-            onDismissRequest = { showDialog = false },
+            onDismissRequest = { if (!isUploading) showDialog = false },
             title = { Text(if (editingEventIndex != null) "Edit Event" else "Add New Event") },
             text = {
                 LazyColumn(modifier = Modifier.padding(8.dp)) {
@@ -1142,12 +1150,9 @@ fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
                     item { Spacer(modifier = Modifier.height(8.dp)) }
                     item { OutlinedTextField(value = registrationFee, onValueChange = { registrationFee = it }, label = { Text("Registration Fee (e.g., Free, $50)") }, singleLine = true) }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
-                    item { 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Date") }, singleLine = true, modifier = Modifier.weight(1f))
-                            OutlinedTextField(value = time, onValueChange = { time = it }, label = { Text("Time") }, singleLine = true, modifier = Modifier.weight(1f))
-                        }
-                    }
+                    item { OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Date") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    item { OutlinedTextField(value = time, onValueChange = { time = it }, label = { Text("Time") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
                     item { OutlinedTextField(value = venue, onValueChange = { venue = it }, label = { Text("Venue") }, singleLine = true) }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
@@ -1168,49 +1173,82 @@ fun EventsScreen(user: UserData, mainEvent: MainEventConfig) {
                         )
                     }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
-                    item { OutlinedTextField(value = qrCodeUrl, onValueChange = { qrCodeUrl = it }, label = { Text("Payment QR Code Image URL") }, singleLine = true) }
+                    item { 
+                        Button(
+                            onClick = { imageLauncher.launch("image/*") }, 
+                            enabled = !isUploading,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black)
+                        ) {
+                            Text(if (qrImageUri != null) "QR Image Selected" else if (qrCodeUrl.isNotBlank()) "Change QR Image" else "Select Payment QR Image")
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    if (title.isNotBlank()) {
-                        val eventMap = mapOf(
-                            "title" to title,
-                            "maxRegistration" to maxRegistration,
-                            "registrationFee" to registrationFee,
-                            "date" to date,
-                            "time" to time,
-                            "venue" to venue,
-                            "description" to description,
-                            "qrCodeUrl" to qrCodeUrl
-                        )
-                        if (editingEventIndex != null) {
-                            val eventId = eventsList[editingEventIndex!!].id
-                            db.collection("mainEvents").document(mainEvent.id)
-                                .collection("events").document(eventId).update(eventMap as Map<String, Any>)
-                        } else {
-                            db.collection("mainEvents").document(mainEvent.id)
-                                .collection("events").add(eventMap)
+                Button(
+                    enabled = !isUploading,
+                    onClick = {
+                    if (title.isNotBlank() && !isUploading) {
+                        isUploading = true
+                        val saveEvent = { finalUrl: String ->
+                            val eventMap = mapOf(
+                                "title" to title,
+                                "maxRegistration" to maxRegistration,
+                                "registrationFee" to registrationFee,
+                                "date" to date,
+                                "time" to time,
+                                "venue" to venue,
+                                "description" to description,
+                                "qrCodeUrl" to finalUrl
+                            )
+                            if (editingEventIndex != null) {
+                                val eventId = eventsList[editingEventIndex!!].id
+                                db.collection("mainEvents").document(mainEvent.id)
+                                    .collection("events").document(eventId).update(eventMap as Map<String, Any>)
+                            } else {
+                                db.collection("mainEvents").document(mainEvent.id)
+                                    .collection("events").add(eventMap)
+                            }
+                            title = ""
+                            maxRegistration = ""
+                            registrationFee = ""
+                            date = ""
+                            time = ""
+                            venue = ""
+                            description = ""
+                            qrCodeUrl = ""
+                            qrImageUri = null
+                            editingEventIndex = null
+                            isUploading = false
+                            showDialog = false
                         }
-                        title = ""
-                        maxRegistration = ""
-                        registrationFee = ""
-                        date = ""
-                        time = ""
-                        venue = ""
-                        description = ""
-                        qrCodeUrl = ""
-                        editingEventIndex = null
-                        showDialog = false
+
+                        if (qrImageUri != null) {
+                            val storageRef = FirebaseStorage.getInstance().reference.child("events_qr/${UUID.randomUUID()}")
+                            storageRef.putFile(qrImageUri!!).continueWithTask { task ->
+                                if (!task.isSuccessful) task.exception?.let { throw it }
+                                storageRef.downloadUrl
+                            }.addOnCompleteListener { task ->
+                                if (task.isSuccessful) {
+                                    saveEvent(task.result.toString())
+                                } else {
+                                    isUploading = false
+                                }
+                            }
+                        } else {
+                            saveEvent(qrCodeUrl)
+                        }
                     }
                 }) {
-                    Text(if (editingEventIndex != null) "Save" else "Add")
+                    Text(if (isUploading) "Saving..." else if (editingEventIndex != null) "Save" else "Add")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { 
-                    showDialog = false 
-                    editingEventIndex = null
+                    if (!isUploading) {
+                        showDialog = false 
+                        editingEventIndex = null
+                    }
                 }) { Text("Cancel") }
             }
         )
