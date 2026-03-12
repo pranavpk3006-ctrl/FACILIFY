@@ -33,7 +33,19 @@ import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
 import java.util.UUID
+
+data class TeamMember(
+    val memberId: String = "",
+    val name: String = "",
+    val roll: String = "",
+    val post: String = ""
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -388,6 +400,8 @@ fun FacilifyApp(user: UserData, mainEvent: MainEventConfig, onLogout: () -> Unit
                 HomeScreen(user = user, mainEvent = mainEvent)
             } else if (selectedTab == 1) { // Render Facility screen content
                 FacilityScreen(user = user, mainEvent = mainEvent)
+            } else if (selectedTab == 2) {
+                TeamScreen()
             } else if (selectedTab == 3) {
                 EventsScreen(user = user, mainEvent = mainEvent)
             } else {
@@ -474,6 +488,35 @@ fun FacilityCategoryCard(title: String, icon: ImageVector, onClick: () -> Unit) 
 @Composable
 fun TopBar(user: UserData, mainEvent: MainEventConfig, onNotificationClick: () -> Unit = {}, onLogout: () -> Unit = {}, onBackClick: () -> Unit = {}, modifier: Modifier = Modifier) {
     var profileMenuExpanded by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
+    var postInput by remember { mutableStateOf("") }
+
+    if (showEditProfileDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditProfileDialog = false },
+            title = { Text("Edit Profile") },
+            text = {
+                OutlinedTextField(
+                    value = postInput,
+                    onValueChange = { postInput = it },
+                    label = { Text("Post (e.g. Coordinator)") }
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val dbRef = FirebaseDatabase.getInstance().getReference("TeamMembers").child(user.rollNo)
+                    val memberData = TeamMember(memberId = user.rollNo, name = user.name, roll = user.rollNo, post = postInput)
+                    dbRef.setValue(memberData)
+                    showEditProfileDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditProfileDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Row(
         modifier = modifier
@@ -532,11 +575,67 @@ fun TopBar(user: UserData, mainEvent: MainEventConfig, onNotificationClick: () -
                 ) {
                     DropdownMenuItem(text = { Text("Hi ${user.name}", color = Color.Black) }, onClick = { profileMenuExpanded = false })
                     DropdownMenuItem(text = { Text("Roll ${user.rollNo}", color = Color.Black) }, onClick = { profileMenuExpanded = false })
+                    if (user.role == "Admin") {
+                        DropdownMenuItem(text = { Text("Edit Profile", color = Color.Black) }, onClick = { 
+                            profileMenuExpanded = false
+                            showEditProfileDialog = true
+                        })
+                    }
                     DropdownMenuItem(text = { Text("Help", color = Color.Black) }, onClick = { profileMenuExpanded = false })
                     DropdownMenuItem(text = { Text("Logout", color = Color.Black) }, onClick = { 
                         profileMenuExpanded = false
                         onLogout()
                     })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TeamScreen() {
+    var teamMembers by remember { mutableStateOf(emptyList<TeamMember>()) }
+
+    LaunchedEffect(Unit) {
+        val dbRef = FirebaseDatabase.getInstance().getReference("TeamMembers")
+        dbRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val members = mutableListOf<TeamMember>()
+                for (child in snapshot.children) {
+                    val member = child.getValue(TeamMember::class.java)
+                    if (member != null) {
+                        members.add(member)
+                    }
+                }
+                teamMembers = members
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Team Section", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(teamMembers.size) { index ->
+                val member = teamMembers[index]
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Name: ${member.name}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Roll Number: ${member.roll}", fontSize = 14.sp, color = Color.DarkGray)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Post: ${member.post}", fontSize = 14.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Medium)
+                    }
                 }
             }
         }
@@ -938,9 +1037,12 @@ val mockAdmins = listOf(
 
 @Composable
 fun LoginScreen(onLoginSuccess: (UserData) -> Unit) {
+    var isLoginAsAdmin by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var rollNo by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -949,55 +1051,101 @@ fun LoginScreen(onLoginSuccess: (UserData) -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("FACILIFY", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF2E7D32), letterSpacing = 2.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Welcome! Please login to continue.", fontSize = 16.sp, color = Color.Gray)
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("Name") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        OutlinedTextField(
-            value = rollNo,
-            onValueChange = { rollNo = it },
-            label = { Text("Roll No.") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        if (errorMessage.isNotEmpty()) {
-            Text(errorMessage, color = Color.Red, fontSize = 14.sp)
-        }
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Button(
-            onClick = {
-                if (name.isBlank() || rollNo.isBlank()) {
-                    errorMessage = "Please enter both Name and Roll No."
-                    return@Button
-                }
-                
-                // Check against mock database
-                val adminUser = mockAdmins.find { it.rollNo.equals(rollNo, ignoreCase = true) && it.name.equals(name, ignoreCase = true) }
-                if (adminUser != null) {
-                    onLoginSuccess(adminUser)
-                } else {
-                    // Sign in as a regular user
-                    onLoginSuccess(UserData(name = name, rollNo = rollNo, role = "User"))
-                }
-            },
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-        ) {
-            Text("Login", fontSize = 16.sp, color = Color.White)
+        if (!isLoginAsAdmin && name.isEmpty() && rollNo.isEmpty()) {
+            Text("FACILIFY", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF2E7D32), letterSpacing = 2.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Welcome! Please select your login type.", fontSize = 16.sp, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = { isLoginAsAdmin = true },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+            ) {
+                Text("Login as Admin", fontSize = 16.sp, color = Color.White)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = { /* Form will be revealed as user immediately */ name = " " ; name = "" },
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Text("Continue as User", fontSize = 16.sp, color = Color(0xFF2E7D32))
+            }
+        } else {
+            Text("FACILIFY", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF2E7D32), letterSpacing = 2.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(if (isLoginAsAdmin) "Admin Login" else "User Login", fontSize = 16.sp, color = Color.Gray)
+            Spacer(modifier = Modifier.height(32.dp))
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Name") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = rollNo,
+                onValueChange = { rollNo = it },
+                label = { Text("Roll No.") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (isLoginAsAdmin) {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Admin Password") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            if (errorMessage.isNotEmpty()) {
+                Text(errorMessage, color = Color.Red, fontSize = 14.sp)
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    if (name.isBlank() || rollNo.isBlank()) {
+                        errorMessage = "Please enter both Name and Roll No."
+                        return@Button
+                    }
+
+                    if (isLoginAsAdmin) {
+                        if (password == "12345") {
+                            onLoginSuccess(UserData(name = name, rollNo = rollNo, role = "Admin"))
+                        } else {
+                            errorMessage = "Wrong Password"
+                            Toast.makeText(context, "Wrong Password", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        onLoginSuccess(UserData(name = name, rollNo = rollNo, role = "User"))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+            ) {
+                Text("Login", fontSize = 16.sp, color = Color.White)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            TextButton(onClick = {
+                isLoginAsAdmin = false
+                name = ""
+                rollNo = ""
+                password = ""
+                errorMessage = ""
+            }) {
+                Text("Back to options", color = Color.Gray)
+            }
         }
     }
 }
