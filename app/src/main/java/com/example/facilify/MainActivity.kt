@@ -489,7 +489,56 @@ fun FacilityCategoryCard(title: String, icon: ImageVector, onClick: () -> Unit) 
 fun TopBar(user: UserData, mainEvent: MainEventConfig, onNotificationClick: () -> Unit = {}, onLogout: () -> Unit = {}, onBackClick: () -> Unit = {}, modifier: Modifier = Modifier) {
     var profileMenuExpanded by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showEditDetailsDialog by remember { mutableStateOf(false) }
     var postInput by remember { mutableStateOf("") }
+    var nicknameInput by remember { mutableStateOf("") }
+    var birthDateInput by remember { mutableStateOf("") }
+
+    LaunchedEffect(showEditDetailsDialog) {
+        if (showEditDetailsDialog) {
+            val dbRef = FirebaseDatabase.getInstance().getReference("UserDetails").child(user.rollNo)
+            dbRef.get().addOnSuccessListener { snapshot ->
+                nicknameInput = snapshot.child("nickname").getValue(String::class.java) ?: ""
+                birthDateInput = snapshot.child("birthDate").getValue(String::class.java) ?: ""
+            }
+        }
+    }
+
+    if (showEditDetailsDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDetailsDialog = false },
+            title = { Text("Edit Personal Details") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = nicknameInput,
+                        onValueChange = { nicknameInput = it },
+                        label = { Text("Nickname") },
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = birthDateInput,
+                        onValueChange = { birthDateInput = it },
+                        label = { Text("Birth Date (DD/MM/YYYY)") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val dbRef = FirebaseDatabase.getInstance().getReference("UserDetails").child(user.rollNo)
+                    dbRef.setValue(mapOf("nickname" to nicknameInput, "birthDate" to birthDateInput))
+                    showEditDetailsDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDetailsDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     if (showEditProfileDialog) {
         AlertDialog(
@@ -575,8 +624,12 @@ fun TopBar(user: UserData, mainEvent: MainEventConfig, onNotificationClick: () -
                 ) {
                     DropdownMenuItem(text = { Text("Hi ${user.name}", color = Color.Black) }, onClick = { profileMenuExpanded = false })
                     DropdownMenuItem(text = { Text("Roll ${user.rollNo}", color = Color.Black) }, onClick = { profileMenuExpanded = false })
+                    DropdownMenuItem(text = { Text("Edit Details", color = Color.Black) }, onClick = { 
+                        profileMenuExpanded = false
+                        showEditDetailsDialog = true
+                    })
                     if (user.role == "Admin") {
-                        DropdownMenuItem(text = { Text("Edit Profile", color = Color.Black) }, onClick = { 
+                        DropdownMenuItem(text = { Text("Edit Team Post", color = Color.Black) }, onClick = { 
                             profileMenuExpanded = false
                             showEditProfileDialog = true
                         })
