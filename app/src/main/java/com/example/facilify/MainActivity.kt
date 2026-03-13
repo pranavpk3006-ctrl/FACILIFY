@@ -709,6 +709,10 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
     var location by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var imageUrl by remember { mutableStateOf("") }
+    var driverName by remember { mutableStateOf("") }
+    var driverContact by remember { mutableStateOf("") }
+    var busNumber by remember { mutableStateOf("") }
+    var availability by remember { mutableStateOf("") }
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var isUploading by remember { mutableStateOf(false) }
 
@@ -732,7 +736,11 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                             time = doc.getString("time") ?: "",
                             location = doc.getString("location") ?: "",
                             description = doc.getString("description") ?: "",
-                            imageUrl = doc.getString("imageUrl") ?: ""
+                            imageUrl = doc.getString("imageUrl") ?: "",
+                            driverName = doc.getString("driverName") ?: "",
+                            driverContact = doc.getString("driverContact") ?: "",
+                            busNumber = doc.getString("busNumber") ?: "",
+                            availability = doc.getLong("availability")?.toInt() ?: 0
                         )
                     }
                 }
@@ -764,6 +772,10 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                         location = ""
                         description = ""
                         imageUrl = ""
+                        driverName = ""
+                        driverContact = ""
+                        busNumber = ""
+                        availability = ""
                         imageUri = null
                         showDialog = true 
                     },
@@ -798,7 +810,11 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                         verticalAlignment = Alignment.Top
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(item.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            if (category == "Transportation") {
+                                Text("Bus Number: ${item.busNumber}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            } else {
+                                Text(item.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text("${item.date} at ${item.time}", fontSize = 14.sp, color = Color.Gray)
                             Text(item.location, fontSize = 14.sp, color = Color.Gray)
@@ -827,6 +843,10 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                                             location = item.location
                                             description = item.description
                                             imageUrl = item.imageUrl
+                                            driverName = item.driverName
+                                            driverContact = item.driverContact
+                                            busNumber = item.busNumber
+                                            availability = item.availability.toString()
                                             imageUri = null
                                             showDialog = true
                                         }
@@ -854,8 +874,19 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
             title = { Text(if (editingItemIndex != null) "Edit Detail" else "Add New Detail") },
             text = {
                 LazyColumn(modifier = Modifier.padding(8.dp)) {
-                    item { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true) }
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                    if (category != "Transportation") {
+                        item { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true) }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    } else {
+                        item { OutlinedTextField(value = busNumber, onValueChange = { busNumber = it }, label = { Text("Bus Number") }, singleLine = true) }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                        item { OutlinedTextField(value = driverName, onValueChange = { driverName = it }, label = { Text("Driver Name") }, singleLine = true) }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                        item { OutlinedTextField(value = driverContact, onValueChange = { driverContact = it }, label = { Text("Driver Contact") }, singleLine = true) }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                        item { OutlinedTextField(value = availability, onValueChange = { availability = it }, label = { Text("Availability (e.g. 50)") }, singleLine = true) }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
                     item { OutlinedTextField(value = maxCapacity, onValueChange = { maxCapacity = it }, label = { Text("Max Capacity (e.g., 50)") }, singleLine = true) }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
                     item { OutlinedTextField(value = fee, onValueChange = { fee = it }, label = { Text("Fee (e.g., Free, $50)") }, singleLine = true) }
@@ -866,6 +897,7 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                     item { Spacer(modifier = Modifier.height(8.dp)) }
                     item { OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Location") }, singleLine = true) }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
+                    if (category != "Transportation") {
                     item {
                         val wordCount = description.split("\\s+".toRegex()).count { it.isNotEmpty() }
                         OutlinedTextField(
@@ -883,6 +915,7 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                         )
                     }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
                     item { 
                         Button(
                             onClick = { imageLauncher.launch("image/*") }, 
@@ -898,10 +931,11 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                 Button(
                     enabled = !isUploading,
                     onClick = {
-                    if (title.isNotBlank() && !isUploading) {
+                    val isValid = if (category == "Transportation") busNumber.isNotBlank() else title.isNotBlank()
+                    if (isValid && !isUploading) {
                         isUploading = true
                         val saveItem = { finalUrl: String ->
-                            val itemMap = mapOf(
+                            val itemMap = mutableMapOf<String, Any>(
                                 "title" to title,
                                 "maxCapacity" to maxCapacity,
                                 "fee" to fee,
@@ -911,6 +945,12 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                                 "description" to description,
                                 "imageUrl" to finalUrl
                             )
+                            if (category == "Transportation") {
+                                itemMap["busNumber"] = busNumber
+                                itemMap["driverName"] = driverName
+                                itemMap["driverContact"] = driverContact
+                                itemMap["availability"] = availability.toIntOrNull() ?: 0
+                            }
                             if (editingItemIndex != null) {
                                 val itemId = itemsList[editingItemIndex!!].id
                                 db.collection("mainEvents").document(mainEvent.id)
@@ -954,22 +994,32 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
     }
 
     if (selectedItem != null) {
+        val displayTitle = if (category == "Transportation") "Bus Number: ${selectedItem!!.busNumber}" else selectedItem!!.title
         AlertDialog(
             onDismissRequest = { selectedItem = null },
-            title = { Text(selectedItem!!.title, fontWeight = FontWeight.Bold) },
+            title = { Text(displayTitle, fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                    item { Text("Max Capacity: ${selectedItem!!.maxCapacity}", color = Color.Black) }
+                    if (category == "Transportation") {
+                        item { Row { Text("Driver Name: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.driverName, color = Color.Black) } }
+                        item { Spacer(modifier = Modifier.height(4.dp)) }
+                        item { Row { Text("Driver Contact: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.driverContact, color = Color.Black) } }
+                        item { Spacer(modifier = Modifier.height(4.dp)) }
+                        item { Row { Text("Availability: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.availability.toString(), color = Color.Black) } }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
+
+                    item { Row { Text("Max Capacity: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.maxCapacity, color = Color.Black) } }
                     item { Spacer(modifier = Modifier.height(4.dp)) }
-                    item { Text("Fee: ${selectedItem!!.fee}", color = Color.Black) }
+                    item { Row { Text("Fee: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.fee, color = Color.Black) } }
                     item { Spacer(modifier = Modifier.height(4.dp)) }
-                    item { Text("Date: ${selectedItem!!.date}", color = Color.Black) }
+                    item { Row { Text("Date: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.date, color = Color.Black) } }
                     item { Spacer(modifier = Modifier.height(4.dp)) }
-                    item { Text("Time: ${selectedItem!!.time}", color = Color.Black) }
+                    item { Row { Text("Time: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.time, color = Color.Black) } }
                     item { Spacer(modifier = Modifier.height(4.dp)) }
-                    item { Text("Location: ${selectedItem!!.location}", color = Color.Black) }
+                    item { Row { Text("Location: ", fontWeight = FontWeight.Bold, color = Color.Black); Text(selectedItem!!.location, color = Color.Black) } }
                     item { Spacer(modifier = Modifier.height(8.dp)) }
-                    if (selectedItem!!.description.isNotBlank()) {
+                    if (category != "Transportation" && selectedItem!!.description.isNotBlank()) {
                         item { Text("Description:", fontWeight = FontWeight.Medium, color = Color.Black) }
                         item { Spacer(modifier = Modifier.height(4.dp)) }
                         item { Text(selectedItem!!.description, color = Color.DarkGray, fontSize = 14.sp) }
@@ -992,8 +1042,25 @@ fun FacilityCategoryDetailsScreen(category: String, user: UserData, mainEvent: M
                 }
             },
             confirmButton = {
-                Button(onClick = { selectedItem = null }) {
-                    Text("Close")
+                Row {
+                    if (category == "Transportation" && selectedItem!!.availability > 0) {
+                        Button(
+                            onClick = {
+                                val newAvailability = selectedItem!!.availability - 1
+                                db.collection("mainEvents").document(mainEvent.id)
+                                    .collection("facilities_${category.lowercase()}").document(selectedItem!!.id)
+                                    .update("availability", newAvailability)
+                                selectedItem = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text("Book", color = Color.White)
+                        }
+                    }
+                    Button(onClick = { selectedItem = null }) {
+                        Text("Close")
+                    }
                 }
             }
         )
@@ -1034,14 +1101,18 @@ fun BottomNavigationBar(selectedTab: Int, onTabSelected: (Int) -> Unit) {
 // Data Model & Dummy Data
 data class FacilityItemData(
     val id: String = "",
-    val title: String,
-    val maxCapacity: String,
-    val fee: String,
-    val date: String,
-    val time: String,
-    val location: String,
-    val description: String,
-    val imageUrl: String
+    val title: String = "",
+    val maxCapacity: String = "",
+    val fee: String = "",
+    val date: String = "",
+    val time: String = "",
+    val location: String = "",
+    val description: String = "",
+    val imageUrl: String = "",
+    val driverName: String = "",
+    val driverContact: String = "",
+    val busNumber: String = "",
+    val availability: Int = 0
 )
 
 
