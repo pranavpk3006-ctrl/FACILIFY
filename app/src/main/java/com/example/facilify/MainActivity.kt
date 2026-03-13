@@ -1277,19 +1277,31 @@ fun LoginScreen(onLoginSuccess: (UserData) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(user: UserData, mainEvent: MainEventConfig) {
-    val db = FirebaseFirestore.getInstance()
+    val dbRef = FirebaseDatabase.getInstance().getReference("Gallery").child(mainEvent.id)
     var showDialog by remember { mutableStateOf(false) }
-    var newImageUrl by remember { mutableStateOf("") }
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
     var fullScreenImage by remember { mutableStateOf<String?>(null) }
     var galleryImages by remember { mutableStateOf(emptyList<String>()) }
 
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        imageUri = uri
+    }
+
     LaunchedEffect(mainEvent.id) {
-        db.collection("mainEvents").document(mainEvent.id).collection("gallery")
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot != null) {
-                    galleryImages = snapshot.documents.mapNotNull { it.getString("url") }
+        dbRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val urls = mutableListOf<String>()
+                for (child in snapshot.children) {
+                    val url = child.child("imageUrl").getValue(String::class.java)
+                    if (url != null) {
+                        urls.add(url)
+                    }
                 }
+                galleryImages = urls
             }
+            override fun onCancelled(error: DatabaseError) {}
+        })
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -1301,7 +1313,10 @@ fun HomeScreen(user: UserData, mainEvent: MainEventConfig) {
             Text("Gallery", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
             if (user.role == "Admin") {
                 Button(
-                    onClick = { showDialog = true },
+                    onClick = { 
+                        imageUri = null
+                        showDialog = true 
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     modifier = Modifier.height(36.dp)
@@ -1312,9 +1327,10 @@ fun HomeScreen(user: UserData, mainEvent: MainEventConfig) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         
-        androidx.compose.foundation.lazy.LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp),
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             items(galleryImages.size) { index ->
@@ -1324,9 +1340,8 @@ fun HomeScreen(user: UserData, mainEvent: MainEventConfig) {
                     contentDescription = "Gallery Image",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .height(240.dp)
-                        .width(340.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable { fullScreenImage = imageUrl }
                 )
             }
@@ -1335,30 +1350,51 @@ fun HomeScreen(user: UserData, mainEvent: MainEventConfig) {
 
     if (showDialog) {
         AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text("Add Photo") },
+            onDismissRequest = { if (!isUploading) showDialog = false },
+            title = { Text("Upload Photo", fontWeight = FontWeight.Bold) },
             text = {
-                OutlinedTextField(
-                    value = newImageUrl,
-                    onValueChange = { newImageUrl = it },
-                    label = { Text("Image URL") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column {
+                    Text("Select an image to upload to the event gallery. Only admins can do this.", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { imageLauncher.launch("image/*") },
+                        enabled = !isUploading,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray, contentColor = Color.Black),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (imageUri != null) "Image Selected! (Click to change)" else "Select Image from Gallery")
+                    }
+                }
             },
             confirmButton = {
-                Button(onClick = {
-                    if (newImageUrl.isNotBlank()) {
-                        db.collection("mainEvents").document(mainEvent.id).collection("gallery")
-                            .add(mapOf("url" to newImageUrl))
-                        newImageUrl = ""
-                        showDialog = false
+                Button(
+                    enabled = !isUploading,
+                    onClick = {
+                    if (imageUri != null && !isUploading) {
+                        isUploading = true
+                        val storageRef = FirebaseStorage.getInstance().reference.child("gallery_images/${UUID.randomUUID()}.jpg")
+                        storageRef.putFile(imageUri!!).continueWithTask { task ->
+                            if (!task.isSuccessful) task.exception?.let { throw it }
+                            storageRef.downloadUrl
+                        }.addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                val url = task.result.toString()
+                                val imageId = dbRef.push().key ?: UUID.randomUUID().toString()
+                                dbRef.child(imageId).setValue(mapOf("imageId" to imageId, "imageUrl" to url))
+                                showDialog = false
+                                isUploading = false
+                                imageUri = null
+                            } else {
+                                isUploading = false
+                            }
+                        }
                     }
                 }) {
-                    Text("Add")
+                    Text(if (isUploading) "Uploading..." else "Upload")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDialog = false }) {
+                TextButton(onClick = { if (!isUploading) showDialog = false }) {
                     Text("Cancel")
                 }
             }
